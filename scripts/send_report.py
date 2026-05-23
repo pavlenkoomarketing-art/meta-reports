@@ -47,12 +47,44 @@ def fetch_data(account_id, date_range):
         for row in rows if row and row[0]
     ]
 
-def get_status(campaigns):
+def fetch_data_custom(account_id, start_date, end_date):
+    url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
+    query = json.dumps({
+        "ds_id": "FA",
+        "ds_accounts": account_id,
+        "ds_user": "948296091374934",
+        "ds_start_date": start_date,
+        "ds_end_date": end_date,
+        "max_rows": 100,
+        "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
+        "api_key": SUPERMETRICS_API_KEY,
+    }, separators=(",", ":"))
+    r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=30)
+    r.raise_for_status()
+    result = r.json()
+    rows = result.get("data", [])
+    if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
+        rows = rows[1:]
+    return [
+        {
+            "campaign":    row[0],
+            "result":      int(float(row[1] or 0)),
+            "cost":        float(row[2] or 0),
+            "impressions": int(float(row[3] or 0)),
+            "clicks":      int(float(row[4] or 0)),
+            "ctr":         float(row[5] or 0) * 100,
+            "cpc":         float(row[6] or 0),
+            "cpm":         float(row[7] or 0),
+            "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
+        }
+        for row in rows if row and row[0]
+    ]
+
+def get_status(campaigns, is_weekly=False):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     data_str = json.dumps(campaigns, ensure_ascii=False)
-    prompt = f"""Проаналізуй Meta Ads кампанії і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
-    - CTR норма: для трафику >= 1.5% — добре, для доставки >= 1.0% — добре, нижче — слідкувати
-- 🔴 тільки якщо result <= 2 або CTR < 0.8%
+    period = "тиждень" if is_weekly else "сьогодні"
+    prompt = f"""Проаналізуй Meta Ads кампанії за {period} і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
 
 Дані: {data_str}
 
@@ -60,9 +92,10 @@ def get_status(campaigns):
 [{{"emoji": "🟢", "name": "назва кампанії", "desc": "коротка конкретна рекомендація"}}, ...]
 
 Правила:
+- CTR норма: для трафику >= 1.5% — добре, для доставки >= 1.0% — добре, нижче — слідкувати
 - 🟢 якщо CTR >= 2.5% і CPC <= 0.15 — що саме добре і що тримати
-- 🟡 якщо середні показники — що саме перевірити і коли
-- 🔴 якщо result <= 2 або CTR < 1.5% — що терміново зробити
+- 🟡 якщо середні показники — що саме перевірити
+- 🔴 тільки якщо result <= 2 або CTR < 0.8% — що терміново зробити
 - desc максимум 80 символів, конкретно: цифри, дії
 - Мова: українська"""
 
@@ -78,19 +111,18 @@ def get_status(campaigns):
         data = json.loads(text)
         return [(d["emoji"], d["name"], d["desc"]) for d in data]
     except:
-        # Fallback
         statuses = []
         for c in campaigns:
             if c["ctr"] >= 2.5 and c["cpc"] <= 0.15:
                 statuses.append(("🟢", c["campaign"], "все потужно, тримаємо"))
-            elif c["result"] <= 2 or c["ctr"] < 1.5:
+            elif c["result"] <= 2 or c["ctr"] < 0.8:
                 statuses.append(("🔴", c["campaign"], "терміново перевірити / перезапустити"))
             else:
                 statuses.append(("🟡", c["campaign"], "слідкувати за динамікою"))
         return statuses
 
 def get_overall_status(campaigns):
-    red = sum(1 for c in campaigns if c["result"] <= 2 or c["ctr"] < 1.5)
+    red = sum(1 for c in campaigns if c["result"] <= 2 or c["ctr"] < 0.8)
     green = sum(1 for c in campaigns if c["ctr"] >= 2.5 and c["cpc"] <= 0.15)
     total = len(campaigns)
     if red == 0 and green >= total // 2:
@@ -98,19 +130,23 @@ def get_overall_status(campaigns):
     elif red >= total // 2:
         return ("🔴", f"Загальний підсумок: {red} з {total} кампаній потребують термінової уваги!")
     else:
-        return ("🟡", f"Загальний підсумок: є моменти для покращення, слідкуємо за динамікою.")
+        return ("🟡", "Загальний підсумок: є моменти для покращення, слідкуємо за динамікою.")
 
-def generate_image(account_name, campaigns, yesterday_campaigns):
-    today = datetime.utcnow().strftime("%d.%m.%Y")
+def generate_image(account_name, campaigns, yesterday_campaigns, title="Утренній звіт Meta Ads", period=None):
+    today = period if period else datetime.utcnow().strftime("%d.%m.%Y")
     yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%d.%m.%Y")
-    statuses = get_status(campaigns)
+    is_weekly = period is not None
+    statuses = get_status(campaigns, is_weekly=is_weekly)
     overall_emoji, overall_text = get_overall_status(campaigns)
 
-    # Yesterday summary
-    y_cost = sum(c["cost"] for c in yesterday_campaigns)
-    y_results = sum(c["result"] for c in yesterday_campaigns)
-    y_cpr = y_cost / y_results if y_results else 0
-    yesterday_text = f"Вчора ({yesterday})   Витрачено: ${y_cost:.2f}   Отримано: {y_results} результатів   Ціна результату: ${y_cpr:.2f}"
+    # Yesterday / period summary
+    if not is_weekly and yesterday_campaigns:
+        y_cost = sum(c["cost"] for c in yesterday_campaigns)
+        y_results = sum(c["result"] for c in yesterday_campaigns)
+        y_cpr = y_cost / y_results if y_results else 0
+        summary_text = f"Вчора ({yesterday})   Витрачено: ${y_cost:.2f}   Отримано: {y_results} результатів   Ціна результату: ${y_cpr:.2f}"
+    else:
+        summary_text = ""
 
     # Colors
     BG = (28, 28, 30)
@@ -127,11 +163,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
     ROW_H = 56
     TABLE_TOP = 160
     cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
-    col_w = [250, 100, 105, 95, 95, 75, 85, 85, 85] 
+    col_w = [250, 100, 105, 95, 95, 75, 85, 85, 85]
     STATUS_H = 80 + len(statuses) * 44
     OVERALL_H = 60
-    YESTERDAY_H = 50
-    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + YESTERDAY_H + STATUS_H + OVERALL_H + 40
+    SUMMARY_H = 50 if summary_text else 10
+    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + SUMMARY_H + STATUS_H + OVERALL_H + 40
 
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
@@ -144,10 +180,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
         font_b = font_sm = font_title = ImageFont.load_default()
 
     # Header
-    draw.text((40, 28), "Утренній звіт Meta Ads", font=font_title, fill=WHITE)
+    draw.text((40, 28), title, font=font_title, fill=WHITE)
     draw.text((40, 64), f"Клієнт: {account_name}", font=font_sm, fill=GRAY)
-    date_w = int(draw.textlength(f"Дата: {today}", font=font_sm))
-    draw.text((W - date_w - 40, 28), f"Дата: {today}", font=font_sm, fill=GRAY)
+    date_label = f"Період: {today}" if is_weekly else f"Дата: {today}"
+    date_w = int(draw.textlength(date_label, font=font_sm))
+    draw.text((W - date_w - 40, 28), date_label, font=font_sm, fill=GRAY)
 
     # Table header
     x = 40
@@ -220,12 +257,13 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
             draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_b, fill=WHITE)
         x += col_w[i]
 
-    # Yesterday summary
+    # Summary line
     ys = y + ROW_H + 16
-    draw.text((40, ys), yesterday_text, font=font_sm, fill=GRAY)
+    if summary_text:
+        draw.text((40, ys), summary_text, font=font_sm, fill=GRAY)
 
     # Status section
-    sy = ys + 40
+    sy = ys + (40 if summary_text else 10)
     draw.rectangle([40, sy, W - 40, sy + 36 + len(statuses) * 44 + 16], fill=BG2, outline=BORDER)
     draw.text((56, sy + 10), "Статус кампаній", font=font_b, fill=WHITE)
     sy += 46
@@ -261,14 +299,35 @@ def send_telegram(text):
     r.raise_for_status()
 
 def main():
+    report_type = os.environ.get("REPORT_TYPE", "daily")
+
     for account in ACCOUNTS:
         try:
-            campaigns = fetch_data(account["id"], "today")
-            yesterday_campaigns = fetch_data(account["id"], "yesterday")
-            if not campaigns:
-                send_telegram(f"⚠️ {account['name']}: немає даних за сьогодні.")
-                continue
-            photo = generate_image(account["name"], campaigns, yesterday_campaigns)
+            if report_type == "weekly":
+                today = datetime.utcnow()
+                last_monday = today - timedelta(days=today.weekday() + 7)
+                last_sunday = last_monday + timedelta(days=6)
+                start = last_monday.strftime("%Y-%m-%d")
+                end = last_sunday.strftime("%Y-%m-%d")
+                campaigns = fetch_data_custom(account["id"], start, end)
+                if not campaigns:
+                    send_telegram(f"⚠️ {account['name']}: немає даних за тиждень.")
+                    continue
+                photo = generate_image(
+                    account["name"],
+                    campaigns,
+                    [],
+                    title="Тижневий звіт Meta Ads",
+                    period=f"{last_monday.strftime('%d.%m.%Y')} – {last_sunday.strftime('%d.%m.%Y')}"
+                )
+            else:
+                campaigns = fetch_data(account["id"], "today")
+                yesterday_campaigns = fetch_data(account["id"], "yesterday")
+                if not campaigns:
+                    send_telegram(f"⚠️ {account['name']}: немає даних за сьогодні.")
+                    continue
+                photo = generate_image(account["name"], campaigns, yesterday_campaigns)
+
             send_telegram_photo(photo)
         except Exception as e:
             send_telegram(f"❌ Помилка: {e}")

@@ -96,7 +96,7 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
     ROW_H = 56
     TABLE_TOP = 160
     cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
-    col_w = [250, 95, 95, 95, 95, 75, 85, 85, 85]
+    col_w = [250, 100, 105, 95, 95, 75, 85, 85, 85] 
     STATUS_H = 80 + len(statuses) * 44
     OVERALL_H = 60
     YESTERDAY_H = 50

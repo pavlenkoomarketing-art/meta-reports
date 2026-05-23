@@ -59,7 +59,7 @@ def generate_report(account_name, campaigns):
 4. Статус: 🟢 добре / 🟡 слідкувати / 🔴 терміново
 5. Plain text, українська мова."""
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+       model="claude-sonnet-4-5",
         max_tokens=1000,
         messages=[{"role": "user", "content": prompt}],
     )

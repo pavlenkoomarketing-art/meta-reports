@@ -23,7 +23,7 @@ def fetch_campaign_data(account_id):
             "ds_user": "948296091374934",
             "ds_start_date": today,
             "ds_end_date": today,
-            "fields": ["adcampaign_name","action_link_click","cost","impressions","clicks","ctr","cpc","cpm"],
+          "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
             "settings": {"report_type": "campaign"},
             "api_key": SUPERMETRICS_API_KEY,
         })

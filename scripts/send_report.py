@@ -14,16 +14,14 @@ ACCOUNTS = [
 ]
 
 def fetch_campaign_data(account_id):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
     query = json.dumps({
         "ds_id": "FA",
         "ds_accounts": account_id,
         "ds_user": "948296091374934",
-        "ds_start_date": today,
-        "ds_end_date": today,
+        "date_range_type": "today",
+        "max_rows": 100,
         "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
-        "settings": {"report_type": "campaign"},
         "api_key": SUPERMETRICS_API_KEY,
     }, separators=(",", ":"))
     r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=30)

@@ -16,20 +16,17 @@ ACCOUNTS = [
 def fetch_campaign_data(account_id):
     today = datetime.utcnow().strftime("%Y-%m-%d")
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
-    params = {
-        "json": json.dumps({
-            "ds_id": "FA",
-            "ds_accounts": account_id,
-            "ds_user": "948296091374934",
-            "ds_start_date": today,
-            "ds_end_date": today,
-          "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
-            "settings": {"report_type": "campaign"},
-            "api_key": SUPERMETRICS_API_KEY,
-        })
+    data = {
+        "ds_id": "FA",
+        "ds_accounts": account_id,
+        "ds_user": "948296091374934",
+        "ds_start_date": today,
+        "ds_end_date": today,
+        "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
+        "settings[report_type]": "campaign",
+        "api_key": SUPERMETRICS_API_KEY,
     }
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
+    r = requests.get(url, params=data, timeout=30)
     data = r.json()
     rows = data.get("data", [])
     if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():

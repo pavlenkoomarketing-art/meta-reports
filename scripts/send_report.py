@@ -16,7 +16,6 @@ ACCOUNTS = [
 def fetch_campaign_data(account_id):
     today = datetime.utcnow().strftime("%Y-%m-%d")
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
-   headers = {"Content-Type": "application/json"}
     payload = {
         "ds_id": "FA",
         "ds_accounts": [account_id],
@@ -27,8 +26,7 @@ def fetch_campaign_data(account_id):
         "settings": {"report_type": "campaign"},
         "api_key": SUPERMETRICS_API_KEY,
     }
-    r = requests.post(url, json=payload, headers=headers, timeout=30)
-    r.raise_for_status()
+    r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
     result = r.json()
     rows = result.get("data", [])
@@ -57,9 +55,9 @@ def generate_report(account_name, campaigns):
 Дата: {today}
 Дані: {data_str}
 Правила:
-1. Заголовок: "📊 Утренній звіт Meta Ads / Клієнт: {account_name} / Дата: {today}"
+1. Заголовок: 📊 Утренній звіт Meta Ads / Клієнт: {account_name} / Дата: {today}
 2. По кожній кампанії: Назва | Результат | Витрати | Покази | CTR | CPC | CPM
-3. Рядок "Разом"
+3. Рядок Разом
 4. Статус: 🟢 добре / 🟡 слідкувати / 🔴 терміново
 5. Plain text, українська мова."""
     message = client.messages.create(

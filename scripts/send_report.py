@@ -39,7 +39,7 @@ def fetch_campaign_data(account_id):
             "cost":        float(row[2] or 0),
             "impressions": int(float(row[3] or 0)),
             "clicks":      int(float(row[4] or 0)),
-            "ctr":         float(row[5] or 0),
+            "ctr":         float(row[5] or 0) * 100,
             "cpc":         float(row[6] or 0),
             "cpm":         float(row[7] or 0),
         }

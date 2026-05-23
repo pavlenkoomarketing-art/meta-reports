@@ -48,15 +48,44 @@ def fetch_data(account_id, date_range):
     ]
 
 def get_status(campaigns):
-    statuses = []
-    for c in campaigns:
-        if c["ctr"] >= 2.5 and c["cpc"] <= 0.15:
-            statuses.append(("🟢", c["campaign"], "все потужно, тримаємо"))
-        elif c["result"] <= 2 or c["ctr"] < 1.5:
-            statuses.append(("🔴", c["campaign"], "терміново перевірити / перезапустити"))
-        else:
-            statuses.append(("🟡", c["campaign"], "слідкувати за динамікою"))
-    return statuses
+    client = Anthropic(api_key=ANTHROPIC_API_KEY)
+    data_str = json.dumps(campaigns, ensure_ascii=False)
+    prompt = f"""Проаналізуй Meta Ads кампанії і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
+
+Дані: {data_str}
+
+Формат відповіді (масив об'єктів, порядок як у вхідних даних):
+[{{"emoji": "🟢", "name": "назва кампанії", "desc": "коротка конкретна рекомендація"}}, ...]
+
+Правила:
+- 🟢 якщо CTR >= 2.5% і CPC <= 0.15 — що саме добре і що тримати
+- 🟡 якщо середні показники — що саме перевірити і коли
+- 🔴 якщо result <= 2 або CTR < 1.5% — що терміново зробити
+- desc максимум 80 символів, конкретно: цифри, дії
+- Мова: українська"""
+
+    message = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    try:
+        text = message.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1].replace("json", "").strip()
+        data = json.loads(text)
+        return [(d["emoji"], d["name"], d["desc"]) for d in data]
+    except:
+        # Fallback
+        statuses = []
+        for c in campaigns:
+            if c["ctr"] >= 2.5 and c["cpc"] <= 0.15:
+                statuses.append(("🟢", c["campaign"], "все потужно, тримаємо"))
+            elif c["result"] <= 2 or c["ctr"] < 1.5:
+                statuses.append(("🔴", c["campaign"], "терміново перевірити / перезапустити"))
+            else:
+                statuses.append(("🟡", c["campaign"], "слідкувати за динамікою"))
+        return statuses
 
 def get_overall_status(campaigns):
     red = sum(1 for c in campaigns if c["result"] <= 2 or c["ctr"] < 1.5)

@@ -1,7 +1,7 @@
 import os
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from anthropic import Anthropic
 from PIL import Image, ImageDraw, ImageFont
 import io
@@ -15,13 +15,13 @@ ACCOUNTS = [
     {"id": "act_2474323176012939", "name": "VIET CORNER RK"},
 ]
 
-def fetch_campaign_data(account_id):
+def fetch_data(account_id, date_range):
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
     query = json.dumps({
         "ds_id": "FA",
         "ds_accounts": account_id,
         "ds_user": "948296091374934",
-        "date_range_type": "today",
+        "date_range_type": date_range,
         "max_rows": 100,
         "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
         "api_key": SUPERMETRICS_API_KEY,
@@ -51,15 +51,22 @@ def get_status(campaigns):
     for c in campaigns:
         if c["ctr"] >= 2.5 and c["cpc"] <= 0.15:
             statuses.append(("🟢", c["campaign"], "все потужно, тримаємо"))
-        elif c["result"] <= 2 or c["ctr"] < 1.0:
+        elif c["result"] <= 2 or c["ctr"] < 1.5:
             statuses.append(("🔴", c["campaign"], "терміново перевірити / перезапустити"))
         else:
             statuses.append(("🟡", c["campaign"], "слідкувати за динамікою"))
     return statuses
 
-def generate_image(account_name, campaigns):
+def generate_image(account_name, campaigns, yesterday_campaigns):
     today = datetime.utcnow().strftime("%d.%m.%Y")
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%d.%m.%Y")
     statuses = get_status(campaigns)
+
+    # Yesterday summary
+    y_cost = sum(c["cost"] for c in yesterday_campaigns)
+    y_results = sum(c["result"] for c in yesterday_campaigns)
+    y_cpr = y_cost / y_results if y_results else 0
+    yesterday_text = f"Вчора ({yesterday})   Витрачено: ${y_cost:.2f}   Отримано: {y_results} результатів   Ціна результату: ${y_cpr:.2f}"
 
     # Colors
     BG = (28, 28, 30)
@@ -74,12 +81,12 @@ def generate_image(account_name, campaigns):
 
     W = 1100
     ROW_H = 56
-    HEADER_H = 100
     TABLE_TOP = 160
     cols = ["Кампанія", "Результат", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
     col_w = [280, 100, 100, 100, 80, 90, 90, 90]
-    STATUS_H = 50 + len(statuses) * 44
-    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + 60 + STATUS_H + 40
+    STATUS_H = 80 + len(statuses) * 44
+    YESTERDAY_H = 60
+    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + YESTERDAY_H + STATUS_H + 40
 
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
@@ -102,7 +109,7 @@ def generate_image(account_name, campaigns):
     x = 40
     draw.rectangle([x, TABLE_TOP, W - 40, TABLE_TOP + ROW_H], fill=BG3)
     for i, col in enumerate(cols):
-        align_x = x + 10 if i == 0 else x + col_w[i] // 2 - draw.textlength(col, font=font_b) // 2
+        align_x = x + 10 if i == 0 else x + col_w[i] // 2 - int(draw.textlength(col, font=font_b)) // 2
         draw.text((align_x, TABLE_TOP + 18), col, font=font_b, fill=GRAY)
         x += col_w[i]
 
@@ -135,24 +142,23 @@ def generate_image(account_name, campaigns):
             color = WHITE
             if i == 5 and c["ctr"] >= 2.5:
                 color = GREEN
-            elif i == 5 and c["ctr"] < 1.0:
+            elif i == 5 and c["ctr"] < 1.5:
                 color = RED
             elif i == 6 and c["cpc"] <= 0.12:
                 color = GREEN
             elif i == 7 and c["cpm"] <= 2.0:
                 color = GREEN
-
             if i == 0:
                 draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
             else:
-                tw = draw.textlength(val, font=font_sm)
+                tw = int(draw.textlength(val, font=font_sm))
                 draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_sm, fill=color)
             x += col_w[i]
 
     # Totals row
     y = TABLE_TOP + ROW_H + len(campaigns) * ROW_H
     draw.rectangle([40, y, W - 40, y + ROW_H], fill=BG3)
-    avg_ctr = totals["clicks"] / totals["impressions"] * 100 if totals["impressions"] else 0
+    avg_ctr = sum(c["ctr"] for c in campaigns) / len(campaigns) if campaigns else 0
     avg_cpc = totals["cost"] / totals["clicks"] if totals["clicks"] else 0
     avg_cpm = totals["cost"] / totals["impressions"] * 1000 if totals["impressions"] else 0
     total_vals = ["Разом", str(totals["result"]), f"${totals['cost']:.2f}",
@@ -163,21 +169,24 @@ def generate_image(account_name, campaigns):
         if i == 0:
             draw.text((x + 10, y + 18), val, font=font_b, fill=WHITE)
         else:
-            tw = draw.textlength(val, font=font_b)
+            tw = int(draw.textlength(val, font=font_b))
             draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_b, fill=WHITE)
         x += col_w[i]
 
+    # Yesterday summary
+    ys = y + ROW_H + 16
+    draw.text((40, ys), yesterday_text, font=font_sm, fill=GRAY)
+
     # Status section
-    sy = TABLE_TOP + ROW_H * (len(campaigns) + 1) + 40
-    draw.text((40, sy), "Статус кампаній", font=font_b, fill=GRAY)
-    sy += 36
-    draw.rectangle([40, sy - 8, W - 40, sy - 8 + len(statuses) * 44 + 16], fill=BG2, outline=BORDER)
+    sy = ys + 44
+    draw.rectangle([40, sy, W - 40, sy + 36 + len(statuses) * 44 + 16], fill=BG2, outline=BORDER)
+    draw.text((56, sy + 10), "Статус кампаній", font=font_b, fill=GRAY)
+    sy += 46
     for emoji, name, desc in statuses:
         color = GREEN if emoji == "🟢" else (YELLOW if emoji == "🟡" else RED)
-        dot = "●"
-        draw.text((60, sy), dot, font=font_b, fill=color)
-        short = name[:40] + "..." if len(name) > 40 else name
-        draw.text((85, sy), f"{short} — {desc}", font=font_sm, fill=WHITE)
+        draw.ellipse([56, sy + 2, 70, sy + 16], fill=color)
+        short = name[:42] + "..." if len(name) > 42 else name
+        draw.text((82, sy), f"{short} — {desc}", font=font_sm, fill=WHITE)
         sy += 44
 
     buf = io.BytesIO()
@@ -185,9 +194,9 @@ def generate_image(account_name, campaigns):
     buf.seek(0)
     return buf
 
-def send_telegram_photo(photo_buf, caption=""):
+def send_telegram_photo(photo_buf):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+    r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID},
                       files={"photo": ("report.png", photo_buf, "image/png")}, timeout=30)
     r.raise_for_status()
     print("Photo sent!")
@@ -200,11 +209,12 @@ def send_telegram(text):
 def main():
     for account in ACCOUNTS:
         try:
-            campaigns = fetch_campaign_data(account["id"])
+            campaigns = fetch_data(account["id"], "today")
+            yesterday_campaigns = fetch_data(account["id"], "yesterday")
             if not campaigns:
                 send_telegram(f"⚠️ {account['name']}: немає даних за сьогодні.")
                 continue
-            photo = generate_image(account["name"], campaigns)
+            photo = generate_image(account["name"], campaigns, yesterday_campaigns)
             send_telegram_photo(photo)
         except Exception as e:
             send_telegram(f"❌ Помилка: {e}")

@@ -51,6 +51,8 @@ def get_status(campaigns):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     data_str = json.dumps(campaigns, ensure_ascii=False)
     prompt = f"""Проаналізуй Meta Ads кампанії і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
+    - CTR норма: для трафику >= 1.5% — добре, для доставки >= 1.0% — добре, нижче — слідкувати
+- 🔴 тільки якщо result <= 2 або CTR < 0.8%
 
 Дані: {data_str}
 

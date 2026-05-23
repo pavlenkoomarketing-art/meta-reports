@@ -1,9 +1,12 @@
-name: Daily Meta Ads Report
+name: Weekly Meta Ads Report
 
 on:
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 8 * * 1'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   send-report:
@@ -12,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,10 +26,11 @@ jobs:
       - name: Install dependencies
         run: pip install requests anthropic Pillow
 
-      - name: Send report
+      - name: Send weekly report
         env:
           SUPERMETRICS_API_KEY: ${{ secrets.SUPERMETRICS_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPORT_TYPE: weekly
         run: python scripts/send_report.py

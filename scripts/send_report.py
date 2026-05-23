@@ -42,6 +42,7 @@ def fetch_data(account_id, date_range):
             "ctr":         float(row[5] or 0) * 100,
             "cpc":         float(row[6] or 0),
             "cpm":         float(row[7] or 0),
+            "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
         }
         for row in rows if row and row[0]
     ]
@@ -57,10 +58,22 @@ def get_status(campaigns):
             statuses.append(("🟡", c["campaign"], "слідкувати за динамікою"))
     return statuses
 
+def get_overall_status(campaigns):
+    red = sum(1 for c in campaigns if c["result"] <= 2 or c["ctr"] < 1.5)
+    green = sum(1 for c in campaigns if c["ctr"] >= 2.5 and c["cpc"] <= 0.15)
+    total = len(campaigns)
+    if red == 0 and green >= total // 2:
+        return ("🟢", "Загальний підсумок: все працює добре. Тримаємо курс!")
+    elif red >= total // 2:
+        return ("🔴", f"Загальний підсумок: {red} з {total} кампаній потребують термінової уваги!")
+    else:
+        return ("🟡", f"Загальний підсумок: є моменти для покращення, слідкуємо за динамікою.")
+
 def generate_image(account_name, campaigns, yesterday_campaigns):
     today = datetime.utcnow().strftime("%d.%m.%Y")
     yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%d.%m.%Y")
     statuses = get_status(campaigns)
+    overall_emoji, overall_text = get_overall_status(campaigns)
 
     # Yesterday summary
     y_cost = sum(c["cost"] for c in yesterday_campaigns)
@@ -79,30 +92,30 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
     RED = (255, 69, 58)
     BORDER = (60, 60, 65)
 
-    W = 1100
+    W = 1200
     ROW_H = 56
     TABLE_TOP = 160
-    cols = ["Кампанія", "Результат", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
-    col_w = [280, 100, 100, 100, 80, 90, 90, 90]
+    cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
+    col_w = [250, 95, 95, 95, 95, 75, 85, 85, 85]
     STATUS_H = 80 + len(statuses) * 44
-    YESTERDAY_H = 60
-    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + YESTERDAY_H + STATUS_H + 40
+    OVERALL_H = 60
+    YESTERDAY_H = 50
+    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + YESTERDAY_H + STATUS_H + OVERALL_H + 40
 
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
     try:
         font_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
         font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
         font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     except:
-        font_b = font = font_sm = font_title = ImageFont.load_default()
+        font_b = font_sm = font_title = ImageFont.load_default()
 
     # Header
     draw.text((40, 28), "Утренній звіт Meta Ads", font=font_title, fill=WHITE)
     draw.text((40, 64), f"Клієнт: {account_name}", font=font_sm, fill=GRAY)
-    date_w = draw.textlength(f"Дата: {today}", font=font_sm)
+    date_w = int(draw.textlength(f"Дата: {today}", font=font_sm))
     draw.text((W - date_w - 40, 28), f"Дата: {today}", font=font_sm, fill=GRAY)
 
     # Table header
@@ -126,10 +139,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
         totals["impressions"] += c["impressions"]
         totals["clicks"] += c["clicks"]
 
-        name = c["campaign"][:32] + "..." if len(c["campaign"]) > 32 else c["campaign"]
+        name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
         values = [
             name,
             str(c["result"]),
+            f"${c['cpr']:.2f}",
             f"${c['cost']:.2f}",
             f"{c['impressions']:,}",
             str(c["clicks"]),
@@ -140,13 +154,13 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
         x = 40
         for i, val in enumerate(values):
             color = WHITE
-            if i == 5 and c["ctr"] >= 2.5:
+            if i == 6 and c["ctr"] >= 2.5:
                 color = GREEN
-            elif i == 5 and c["ctr"] < 1.5:
+            elif i == 6 and c["ctr"] < 1.5:
                 color = RED
-            elif i == 6 and c["cpc"] <= 0.12:
+            elif i == 7 and c["cpc"] <= 0.12:
                 color = GREEN
-            elif i == 7 and c["cpm"] <= 2.0:
+            elif i == 8 and c["cpm"] <= 2.0:
                 color = GREEN
             if i == 0:
                 draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
@@ -161,9 +175,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
     avg_ctr = sum(c["ctr"] for c in campaigns) / len(campaigns) if campaigns else 0
     avg_cpc = totals["cost"] / totals["clicks"] if totals["clicks"] else 0
     avg_cpm = totals["cost"] / totals["impressions"] * 1000 if totals["impressions"] else 0
-    total_vals = ["Разом", str(totals["result"]), f"${totals['cost']:.2f}",
-                  f"{totals['impressions']:,}", str(totals["clicks"]),
-                  f"{avg_ctr:.2f}%", f"${avg_cpc:.2f}", f"${avg_cpm:.2f}"]
+    total_cpr = totals["cost"] / totals["result"] if totals["result"] else 0
+    total_vals = ["Разом", str(totals["result"]), f"${total_cpr:.2f}",
+                  f"${totals['cost']:.2f}", f"{totals['impressions']:,}",
+                  str(totals["clicks"]), f"{avg_ctr:.2f}%",
+                  f"${avg_cpc:.2f}", f"${avg_cpm:.2f}"]
     x = 40
     for i, val in enumerate(total_vals):
         if i == 0:
@@ -178,9 +194,9 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
     draw.text((40, ys), yesterday_text, font=font_sm, fill=GRAY)
 
     # Status section
-    sy = ys + 44
+    sy = ys + 40
     draw.rectangle([40, sy, W - 40, sy + 36 + len(statuses) * 44 + 16], fill=BG2, outline=BORDER)
-    draw.text((56, sy + 10), "Статус кампаній", font=font_b, fill=GRAY)
+    draw.text((56, sy + 10), "Статус кампаній", font=font_b, fill=WHITE)
     sy += 46
     for emoji, name, desc in statuses:
         color = GREEN if emoji == "🟢" else (YELLOW if emoji == "🟡" else RED)
@@ -188,6 +204,13 @@ def generate_image(account_name, campaigns, yesterday_campaigns):
         short = name[:42] + "..." if len(name) > 42 else name
         draw.text((82, sy), f"{short} — {desc}", font=font_sm, fill=WHITE)
         sy += 44
+
+    # Overall status
+    sy += 16
+    overall_color = GREEN if overall_emoji == "🟢" else (YELLOW if overall_emoji == "🟡" else RED)
+    draw.rectangle([40, sy, W - 40, sy + 44], fill=BG3, outline=overall_color)
+    draw.ellipse([56, sy + 14, 70, sy + 28], fill=overall_color)
+    draw.text((82, sy + 13), overall_text, font=font_b, fill=WHITE)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

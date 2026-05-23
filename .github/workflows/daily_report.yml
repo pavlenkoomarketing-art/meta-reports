@@ -1,8 +1,8 @@
-name: Weekly Meta Ads Report
+name: Daily Meta Ads Report
 
 on:
   schedule:
-    - cron: '0 8 * * 1'
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 permissions:
@@ -26,11 +26,10 @@ jobs:
       - name: Install dependencies
         run: pip install requests anthropic Pillow
 
-      - name: Send weekly report
+      - name: Send report
         env:
           SUPERMETRICS_API_KEY: ${{ secrets.SUPERMETRICS_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          REPORT_TYPE: weekly
         run: python scripts/send_report.py

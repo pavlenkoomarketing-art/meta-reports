@@ -16,7 +16,7 @@ ACCOUNTS = [
 def fetch_campaign_data(account_id):
     today = datetime.utcnow().strftime("%Y-%m-%d")
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
-    data = {
+    params = {
         "ds_id": "FA",
         "ds_accounts": account_id,
         "ds_user": "948296091374934",
@@ -26,9 +26,10 @@ def fetch_campaign_data(account_id):
         "settings[report_type]": "campaign",
         "api_key": SUPERMETRICS_API_KEY,
     }
-    r = requests.get(url, params=data, timeout=30)
-    data = r.json()
-    rows = data.get("data", [])
+    r = requests.get(url, params=params, timeout=30)
+    r.raise_for_status()
+    result = r.json()
+    rows = result.get("data", [])
     if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
         rows = rows[1:]
     return [
@@ -50,11 +51,9 @@ def generate_report(account_name, campaigns):
     today  = datetime.utcnow().strftime("%d.%m.%Y")
     data_str = json.dumps(campaigns, ensure_ascii=False, indent=2)
     prompt = f"""Ти асистент з аналізу Meta Ads. Сформуй утренній звіт для Telegram.
-
 Клієнт: {account_name}
 Дата: {today}
 Дані: {data_str}
-
 Правила:
 1. Заголовок: "📊 Утренній звіт Meta Ads / Клієнт: {account_name} / Дата: {today}"
 2. По кожній кампанії: Назва | Результат | Витрати | Покази | CTR | CPC | CPM

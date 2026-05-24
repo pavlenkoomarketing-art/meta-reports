@@ -75,26 +75,35 @@ def fetch_data_custom(account_id, start_date, end_date):
         "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
         "api_key": SUPERMETRICS_API_KEY,
     }, separators=(",", ":"))
-    r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=60)
-    r.raise_for_status()
-    result = r.json()
-    rows = result.get("data", [])
-    if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
-        rows = rows[1:]
-    return [
-        {
-            "campaign":    row[0],
-            "result":      int(float(row[1] or 0)),
-            "cost":        float(row[2] or 0),
-            "impressions": int(float(row[3] or 0)),
-            "clicks":      int(float(row[4] or 0)),
-            "ctr":         float(row[5] or 0) * 100,
-            "cpc":         float(row[6] or 0),
-            "cpm":         float(row[7] or 0),
-            "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
-        }
-        for row in rows if row and row[0]
-    ]
+
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=90)
+            r.raise_for_status()
+            result = r.json()
+            rows = result.get("data", [])
+            if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
+                rows = rows[1:]
+            return [
+                {
+                    "campaign":    row[0],
+                    "result":      int(float(row[1] or 0)),
+                    "cost":        float(row[2] or 0),
+                    "impressions": int(float(row[3] or 0)),
+                    "clicks":      int(float(row[4] or 0)),
+                    "ctr":         float(row[5] or 0) * 100,
+                    "cpc":         float(row[6] or 0),
+                    "cpm":         float(row[7] or 0),
+                    "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
+                }
+                for row in rows if row and row[0]
+            ]
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                import time
+                time.sleep(10)
+                continue
+            raise
 
 def get_status(campaigns, is_weekly=False):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)

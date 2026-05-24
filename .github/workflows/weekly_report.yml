@@ -2,7 +2,7 @@ name: Weekly Meta Ads Report
 
 on:
   schedule:
-    - cron: '0 8 * * 1'
+    - cron: '0 7 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -28,10 +28,12 @@ jobs:
 
       - name: Send weekly report
         env:
-          SUPERMETRICS_API_KEY: ${{ secrets.SUPERMETRICS_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHAT_ID_2: ${{ secrets.TELEGRAM_CHAT_ID_2 }}
+          FB_APP_ID: ${{ secrets.FB_APP_ID }}
+          FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           REPORT_TYPE: weekly
         run: python scripts/send_report.py

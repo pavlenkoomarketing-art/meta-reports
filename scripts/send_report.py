@@ -312,13 +312,17 @@ def send_telegram_photo(photo_bytes):
     chat_ids = [TELEGRAM_CHAT_ID]
     if TELEGRAM_CHAT_ID_2:
         chat_ids.append(TELEGRAM_CHAT_ID_2)
+    print(f"Chat IDs: {chat_ids}")
+    print(f"Photo bytes length: {len(photo_bytes)}")
     for chat_id in chat_ids:
+        print(f"Sending to {chat_id}...")
         r = requests.post(
             url,
             data={"chat_id": chat_id},
             files={"photo": ("report.png", photo_bytes, "image/png")},
             timeout=30
         )
+        print(f"Response: {r.status_code} {r.text}")
         r.raise_for_status()
         print(f"Photo sent to {chat_id}!")
 

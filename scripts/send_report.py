@@ -293,12 +293,21 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     buf.seek(0)
     return buf
 
+CHAT_IDS = [
+    os.environ["TELEGRAM_CHAT_ID"],           # твой личный или основная группа
+    os.environ.get("TELEGRAM_CHAT_ID_2", ""), # группа клиента
+]
+
 def send_telegram_photo(photo_buf):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID},
-                      files={"photo": ("report.png", photo_buf, "image/png")}, timeout=30)
-    r.raise_for_status()
-    print("Photo sent!")
+    for chat_id in CHAT_IDS:
+        if not chat_id:
+            continue
+        photo_buf.seek(0)
+        r = requests.post(url, data={"chat_id": chat_id},
+                          files={"photo": ("report.png", photo_buf, "image/png")}, timeout=30)
+        r.raise_for_status()
+        print(f"Photo sent to {chat_id}!")
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"

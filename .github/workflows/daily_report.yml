@@ -28,9 +28,6 @@ jobs:
 
       - name: Send report
         env:
-          - name: Send report
-        env:
-          SUPERMETRICS_API_KEY: ${{ secrets.SUPERMETRICS_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

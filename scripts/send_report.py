@@ -10,6 +10,7 @@ SUPERMETRICS_API_KEY = os.environ["SUPERMETRICS_API_KEY"]
 ANTHROPIC_API_KEY    = os.environ["ANTHROPIC_API_KEY"]
 TELEGRAM_BOT_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
+TELEGRAM_CHAT_ID_2   = os.environ.get("TELEGRAM_CHAT_ID_2", "")
 
 ACCOUNTS = [
     {"id": "act_2474323176012939", "name": "VIET CORNER RK"},
@@ -18,7 +19,6 @@ ACCOUNTS = [
 def fetch_data(account_id, date_range):
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
     today = datetime.utcnow()
-
     if date_range == "today":
         start = today.strftime("%Y-%m-%d")
         end = today.strftime("%Y-%m-%d")
@@ -29,7 +29,6 @@ def fetch_data(account_id, date_range):
     else:
         start = today.strftime("%Y-%m-%d")
         end = today.strftime("%Y-%m-%d")
-
     query = json.dumps({
         "ds_id": "FA",
         "ds_accounts": account_id,
@@ -41,26 +40,34 @@ def fetch_data(account_id, date_range):
         "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
         "api_key": SUPERMETRICS_API_KEY,
     }, separators=(",", ":"))
-    r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=30)
-    r.raise_for_status()
-    result = r.json()
-    rows = result.get("data", [])
-    if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
-        rows = rows[1:]
-    return [
-        {
-            "campaign":    row[0],
-            "result":      int(float(row[1] or 0)),
-            "cost":        float(row[2] or 0),
-            "impressions": int(float(row[3] or 0)),
-            "clicks":      int(float(row[4] or 0)),
-            "ctr":         float(row[5] or 0) * 100,
-            "cpc":         float(row[6] or 0),
-            "cpm":         float(row[7] or 0),
-            "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
-        }
-        for row in rows if row and row[0]
-    ]
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=90)
+            r.raise_for_status()
+            result = r.json()
+            rows = result.get("data", [])
+            if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
+                rows = rows[1:]
+            return [
+                {
+                    "campaign":    row[0],
+                    "result":      int(float(row[1] or 0)),
+                    "cost":        float(row[2] or 0),
+                    "impressions": int(float(row[3] or 0)),
+                    "clicks":      int(float(row[4] or 0)),
+                    "ctr":         float(row[5] or 0) * 100,
+                    "cpc":         float(row[6] or 0),
+                    "cpm":         float(row[7] or 0),
+                    "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
+                }
+                for row in rows if row and row[0]
+            ]
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                import time
+                time.sleep(10)
+                continue
+            raise
 
 def fetch_data_custom(account_id, start_date, end_date):
     url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
@@ -75,26 +82,34 @@ def fetch_data_custom(account_id, start_date, end_date):
         "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
         "api_key": SUPERMETRICS_API_KEY,
     }, separators=(",", ":"))
-    r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=30)
-    r.raise_for_status()
-    result = r.json()
-    rows = result.get("data", [])
-    if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
-        rows = rows[1:]
-    return [
-        {
-            "campaign":    row[0],
-            "result":      int(float(row[1] or 0)),
-            "cost":        float(row[2] or 0),
-            "impressions": int(float(row[3] or 0)),
-            "clicks":      int(float(row[4] or 0)),
-            "ctr":         float(row[5] or 0) * 100,
-            "cpc":         float(row[6] or 0),
-            "cpm":         float(row[7] or 0),
-            "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
-        }
-        for row in rows if row and row[0]
-    ]
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=90)
+            r.raise_for_status()
+            result = r.json()
+            rows = result.get("data", [])
+            if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
+                rows = rows[1:]
+            return [
+                {
+                    "campaign":    row[0],
+                    "result":      int(float(row[1] or 0)),
+                    "cost":        float(row[2] or 0),
+                    "impressions": int(float(row[3] or 0)),
+                    "clicks":      int(float(row[4] or 0)),
+                    "ctr":         float(row[5] or 0) * 100,
+                    "cpc":         float(row[6] or 0),
+                    "cpm":         float(row[7] or 0),
+                    "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
+                }
+                for row in rows if row and row[0]
+            ]
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                import time
+                time.sleep(10)
+                continue
+            raise
 
 def get_status(campaigns, is_weekly=False):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -114,7 +129,6 @@ def get_status(campaigns, is_weekly=False):
 - 🔴 тільки якщо result <= 2 або CTR < 0.8% — що терміново зробити
 - desc максимум 80 символів, конкретно: цифри, дії
 - Мова: українська"""
-
     message = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=500,
@@ -291,19 +305,14 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return buf
+    return buf.getvalue()
 
-CHAT_IDS = [
-    os.environ["TELEGRAM_CHAT_ID"],           # твой личный или основная группа
-    os.environ.get("TELEGRAM_CHAT_ID_2", ""), # группа клиента
-]
-
-def send_telegram_photo(photo_buf):
+def send_telegram_photo(photo_bytes):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    photo_bytes = photo_buf.read()
-    for chat_id in CHAT_IDS:
-        if not chat_id:
-            continue
+    chat_ids = [TELEGRAM_CHAT_ID]
+    if TELEGRAM_CHAT_ID_2:
+        chat_ids.append(TELEGRAM_CHAT_ID_2)
+    for chat_id in chat_ids:
         r = requests.post(
             url,
             data={"chat_id": chat_id},

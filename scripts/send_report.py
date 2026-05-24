@@ -6,18 +6,80 @@ from anthropic import Anthropic
 from PIL import Image, ImageDraw, ImageFont
 import io
 
-SUPERMETRICS_API_KEY = os.environ["SUPERMETRICS_API_KEY"]
 ANTHROPIC_API_KEY    = os.environ["ANTHROPIC_API_KEY"]
 TELEGRAM_BOT_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
 TELEGRAM_CHAT_ID_2   = os.environ.get("TELEGRAM_CHAT_ID_2", "")
+FB_APP_ID            = os.environ["FB_APP_ID"]
+FB_APP_SECRET        = os.environ["FB_APP_SECRET"]
+FB_ACCESS_TOKEN      = os.environ["FB_ACCESS_TOKEN"]
 
 ACCOUNTS = [
     {"id": "act_2474323176012939", "name": "VIET CORNER RK"},
 ]
 
+def get_long_lived_token():
+    url = "https://graph.facebook.com/oauth/access_token"
+    r = requests.get(url, params={
+        "grant_type": "fb_exchange_token",
+        "client_id": FB_APP_ID,
+        "client_secret": FB_APP_SECRET,
+        "fb_exchange_token": FB_ACCESS_TOKEN,
+    }, timeout=30)
+    r.raise_for_status()
+    return r.json().get("access_token", FB_ACCESS_TOKEN)
+
+def fetch_meta_data(account_id, start_date, end_date):
+    token = get_long_lived_token()
+    url = f"https://graph.facebook.com/v19.0/{account_id}/insights"
+    params = {
+        "access_token": token,
+        "level": "campaign",
+        "fields": "campaign_name,impressions,clicks,ctr,cpc,cpm,spend,actions",
+        "time_range": json.dumps({"since": start_date, "until": end_date}),
+        "limit": 100,
+    }
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, timeout=60)
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            results = []
+            for row in data:
+                spend = float(row.get("spend", 0))
+                impressions = int(row.get("impressions", 0))
+                clicks = int(row.get("clicks", 0))
+                ctr = float(row.get("ctr", 0))
+                cpc = float(row.get("cpc", 0))
+                cpm = float(row.get("cpm", 0))
+                # Результат = link clicks из actions
+                actions = row.get("actions", [])
+                result = 0
+                for action in actions:
+                    if action.get("action_type") == "link_click":
+                        result = int(float(action.get("value", 0)))
+                        break
+                cpr = spend / result if result > 0 else 0
+                results.append({
+                    "campaign":    row.get("campaign_name", ""),
+                    "result":      result,
+                    "cost":        spend,
+                    "impressions": impressions,
+                    "clicks":      clicks,
+                    "ctr":         ctr,
+                    "cpc":         cpc,
+                    "cpm":         cpm,
+                    "cpr":         cpr,
+                })
+            return results
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                import time
+                time.sleep(10)
+                continue
+            raise
+
 def fetch_data(account_id, date_range):
-    url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
     today = datetime.utcnow()
     if date_range == "today":
         start = today.strftime("%Y-%m-%d")
@@ -29,87 +91,10 @@ def fetch_data(account_id, date_range):
     else:
         start = today.strftime("%Y-%m-%d")
         end = today.strftime("%Y-%m-%d")
-    query = json.dumps({
-        "ds_id": "FA",
-        "ds_accounts": account_id,
-        "ds_user": "948296091374934",
-        "date_range_type": "custom",
-        "start_date": start,
-        "end_date": end,
-        "max_rows": 100,
-        "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
-        "api_key": SUPERMETRICS_API_KEY,
-    }, separators=(",", ":"))
-    for attempt in range(3):
-        try:
-            r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=90)
-            r.raise_for_status()
-            result = r.json()
-            rows = result.get("data", [])
-            if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
-                rows = rows[1:]
-            return [
-                {
-                    "campaign":    row[0],
-                    "result":      int(float(row[1] or 0)),
-                    "cost":        float(row[2] or 0),
-                    "impressions": int(float(row[3] or 0)),
-                    "clicks":      int(float(row[4] or 0)),
-                    "ctr":         float(row[5] or 0) * 100,
-                    "cpc":         float(row[6] or 0),
-                    "cpm":         float(row[7] or 0),
-                    "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
-                }
-                for row in rows if row and row[0]
-            ]
-        except requests.exceptions.Timeout:
-            if attempt < 2:
-                import time
-                time.sleep(10)
-                continue
-            raise
+    return fetch_meta_data(account_id, start, end)
 
 def fetch_data_custom(account_id, start_date, end_date):
-    url = "https://api.supermetrics.com/enterprise/v2/query/data/json"
-    query = json.dumps({
-        "ds_id": "FA",
-        "ds_accounts": account_id,
-        "ds_user": "948296091374934",
-        "date_range_type": "custom",
-        "start_date": start_date,
-        "end_date": end_date,
-        "max_rows": 100,
-        "fields": "adcampaign_name,action_link_click,cost,impressions,clicks,ctr,cpc,cpm",
-        "api_key": SUPERMETRICS_API_KEY,
-    }, separators=(",", ":"))
-    for attempt in range(3):
-        try:
-            r = requests.get(f"{url}?json={requests.utils.quote(query)}", timeout=90)
-            r.raise_for_status()
-            result = r.json()
-            rows = result.get("data", [])
-            if rows and isinstance(rows[0], list) and isinstance(rows[0][0], str) and "name" in rows[0][0].lower():
-                rows = rows[1:]
-            return [
-                {
-                    "campaign":    row[0],
-                    "result":      int(float(row[1] or 0)),
-                    "cost":        float(row[2] or 0),
-                    "impressions": int(float(row[3] or 0)),
-                    "clicks":      int(float(row[4] or 0)),
-                    "ctr":         float(row[5] or 0) * 100,
-                    "cpc":         float(row[6] or 0),
-                    "cpm":         float(row[7] or 0),
-                    "cpr":         float(row[2] or 0) / int(float(row[1] or 1)) if float(row[1] or 0) > 0 else 0,
-                }
-                for row in rows if row and row[0]
-            ]
-        except requests.exceptions.Timeout:
-            if attempt < 2:
-                import time
-                time.sleep(10)
-                continue
-            raise
+    return fetch_meta_data(account_id, start_date, end_date)
 
 def get_status(campaigns, is_weekly=False):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -312,17 +297,13 @@ def send_telegram_photo(photo_bytes):
     chat_ids = [TELEGRAM_CHAT_ID]
     if TELEGRAM_CHAT_ID_2:
         chat_ids.append(TELEGRAM_CHAT_ID_2)
-    print(f"Chat IDs: {chat_ids}")
-    print(f"Photo bytes length: {len(photo_bytes)}")
     for chat_id in chat_ids:
-        print(f"Sending to {chat_id}...")
         r = requests.post(
             url,
             data={"chat_id": chat_id},
             files={"photo": ("report.png", photo_bytes, "image/png")},
             timeout=30
         )
-        print(f"Response: {r.status_code} {r.text}")
         r.raise_for_status()
         print(f"Photo sent to {chat_id}!")
 

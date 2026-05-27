@@ -386,6 +386,14 @@ def main():
             client_context = account.get("context", "")
             best_creative = fetch_best_creative(account["id"])
 
+            def main():
+    report_type = os.environ.get("REPORT_TYPE", "daily")
+
+    for account in ACCOUNTS:
+        try:
+            client_context = account.get("context", "")
+            best_creative = fetch_best_creative(account["id"])
+
             if report_type == "weekly":
                 today = datetime.utcnow()
                 last_monday = today - timedelta(days=today.weekday() + 7)
@@ -403,6 +411,33 @@ def main():
                     best_creative=best_creative,
                     client_context=client_context,
                 )
+
+            elif report_type == "monthly":
+                today = datetime.utcnow()
+                # Перший день попереднього місяця
+                first_day = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+                # Останній день попереднього місяця
+                last_day = today.replace(day=1) - timedelta(days=1)
+                start = first_day.strftime("%Y-%m-%d")
+                end = last_day.strftime("%Y-%m-%d")
+                # Позаминулий місяць для порівняння
+                prev_first = (first_day.replace(day=1) - timedelta(days=1)).replace(day=1)
+                prev_last = first_day - timedelta(days=1)
+                campaigns = fetch_data_custom(account["id"], start, end)
+                prev_campaigns = fetch_data_custom(account["id"],
+                    prev_first.strftime("%Y-%m-%d"),
+                    prev_last.strftime("%Y-%m-%d"))
+                if not campaigns:
+                    send_telegram(f"⚠️ {account['name']}: немає даних за місяць.")
+                    continue
+                photo = generate_image(
+                    account["name"], campaigns, prev_campaigns,
+                    title="Місячний звіт Meta Ads",
+                    period=f"{first_day.strftime('%d.%m.%Y')} – {last_day.strftime('%d.%m.%Y')}",
+                    best_creative=best_creative,
+                    client_context=client_context,
+                )
+
             else:
                 campaigns = fetch_data(account["id"], "today")
                 yesterday_campaigns = fetch_data(account["id"], "yesterday")

@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import time
 from datetime import datetime, timedelta
 from anthropic import Anthropic
 from PIL import Image, ImageDraw, ImageFont
@@ -46,7 +47,7 @@ def fetch_meta_data(account_id, start_date, end_date):
     params = {
         "access_token": token,
         "level": "campaign",
-        "fields": "campaign_name,impressions,clicks,ctr,cpc,cpm,spend,actions",
+        "fields": "campaign_name,impressions,clicks,ctr,cpc,cpm,spend,actions,objective",
         "time_range": json.dumps({"since": start_date, "until": end_date}),
         "limit": 100,
     }
@@ -63,6 +64,7 @@ def fetch_meta_data(account_id, start_date, end_date):
                 ctr = float(row.get("ctr", 0))
                 cpc = float(row.get("cpc", 0))
                 cpm = float(row.get("cpm", 0))
+                objective = row.get("objective", "")
                 actions = row.get("actions", [])
                 result = 0
                 for action in actions:
@@ -72,6 +74,7 @@ def fetch_meta_data(account_id, start_date, end_date):
                 cpr = spend / result if result > 0 else 0
                 results.append({
                     "campaign":    row.get("campaign_name", ""),
+                    "objective":   objective,
                     "result":      result,
                     "cost":        spend,
                     "impressions": impressions,
@@ -82,9 +85,13 @@ def fetch_meta_data(account_id, start_date, end_date):
                     "cpr":         cpr,
                 })
             return results
+        except requests.exceptions.HTTPError as e:
+            if "429" in str(e) and attempt < 2:
+                time.sleep(30)
+                continue
+            raise
         except requests.exceptions.Timeout:
             if attempt < 2:
-                import time
                 time.sleep(10)
                 continue
             raise
@@ -104,8 +111,16 @@ def fetch_best_creative(account_id):
             "limit": 50,
             "sort": "impressions_descending",
         }
-        r = requests.get(url, params=params, timeout=60)
-        r.raise_for_status()
+        for attempt in range(3):
+            try:
+                r = requests.get(url, params=params, timeout=60)
+                r.raise_for_status()
+                break
+            except requests.exceptions.HTTPError as e:
+                if "429" in str(e) and attempt < 2:
+                    time.sleep(30)
+                    continue
+                return None
         data = r.json().get("data", [])
         if not data:
             return None
@@ -146,9 +161,11 @@ def fetch_data(account_id, date_range):
     else:
         start = today.strftime("%Y-%m-%d")
         end = today.strftime("%Y-%m-%d")
+    time.sleep(2)
     return fetch_meta_data(account_id, start, end)
 
 def fetch_data_custom(account_id, start_date, end_date):
+    time.sleep(2)
     return fetch_meta_data(account_id, start_date, end_date)
 
 def get_status(campaigns, yesterday_campaigns, is_weekly=False, client_context=""):
@@ -156,25 +173,37 @@ def get_status(campaigns, yesterday_campaigns, is_weekly=False, client_context="
     data_str = json.dumps(campaigns, ensure_ascii=False)
     yesterday_str = json.dumps(yesterday_campaigns, ensure_ascii=False) if yesterday_campaigns else "[]"
     period = "тиждень" if is_weekly else "сьогодні"
+
+    # Добавляем CPM тенденцию
+    cpm_trends = {}
+    if yesterday_campaigns:
+        yesterday_map = {c["campaign"]: c for c in yesterday_campaigns}
+        for c in campaigns:
+            yest = yesterday_map.get(c["campaign"])
+            if yest and yest["cpm"] > 0:
+                diff = ((c["cpm"] - yest["cpm"]) / yest["cpm"]) * 100
+                cpm_trends[c["campaign"]] = diff
+
     prompt = f"""Проаналізуй Meta Ads кампанії за {period} і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
 
 Контекст клієнта: {client_context}
 
 Дані за {period}: {data_str}
 Дані за вчора: {yesterday_str}
+CPM тенденція (% зміна vs вчора): {json.dumps(cpm_trends, ensure_ascii=False)}
 
-Формат відповіді (масив об'єктів, порядок як у вхідних даних):
-[{{"emoji": "🟢", "name": "назва кампанії", "desc": "коротка конкретна рекомендація з порівнянням з вчора якщо є зміни"}}, ...]
+Формат відповіді:
+[{{"emoji": "🟢", "name": "назва кампанії", "desc": "рекомендація"}}, ...]
 
 Правила:
-- Враховуй контекст клієнта при оцінці показників
-- Порівнюй результати з вчорашніми — якщо є зміна >20% обов'язково вкажи
-- CTR норма: для трафику >= 1.5% — добре, для доставки >= 1.0% — добре
-- 🟢 якщо CTR хороший і CPC в нормі для цього клієнта
-- 🟡 якщо середні показники або невелике падіння
-- 🔴 тільки якщо різке падіння результатів або CTR < 0.8%
-- desc максимум 90 символів, конкретно: цифри, порівняння з вчора, дії
+- Враховуй ціль кампанії (objective) при оцінці — для OUTCOME_TRAFFIC норма CTR >= 1.5%, для OUTCOME_ENGAGEMENT >= 2%, для OUTCOME_LEADS оцінюй CPL
+- Порівнюй з вчора — зміна >20% обов'язково вкажи
+- CPM зростає >15% — попередити про підвищення вартості показів
+- CPM падає >15% — позитивний сигнал, вказати
+- 🟢 добре, 🟡 слідкувати, 🔴 терміново
+- desc максимум 90 символів, конкретно: цифри, тренди, дії
 - Мова: українська"""
+
     message = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=600,
@@ -207,6 +236,21 @@ def get_overall_status(campaigns):
         return ("🔴", f"Загальний підсумок: {red} з {total} кампаній потребують термінової уваги!")
     else:
         return ("🟡", "Загальний підсумок: є моменти для покращення, слідкуємо за динамікою.")
+
+def get_cpm_arrow(campaign_name, campaigns, yesterday_campaigns):
+    if not yesterday_campaigns:
+        return ""
+    yesterday_map = {c["campaign"]: c for c in yesterday_campaigns}
+    yest = yesterday_map.get(campaign_name)
+    curr = next((c for c in campaigns if c["campaign"] == campaign_name), None)
+    if not yest or not curr or yest["cpm"] == 0:
+        return ""
+    diff = ((curr["cpm"] - yest["cpm"]) / yest["cpm"]) * 100
+    if diff > 15:
+        return " ↑"
+    elif diff < -15:
+        return " ↓"
+    return ""
 
 def generate_image(account_name, campaigns, yesterday_campaigns, title="Утренній звіт Meta Ads", period=None, best_creative=None, client_context=""):
     today = period if period else datetime.utcnow().strftime("%d.%m.%Y")
@@ -280,10 +324,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         totals["clicks"] += c["clicks"]
 
         name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
+        cpm_arrow = get_cpm_arrow(c["campaign"], campaigns, yesterday_campaigns)
         values = [
             name, str(c["result"]), f"${c['cpr']:.2f}",
             f"${c['cost']:.2f}", f"{c['impressions']:,}", str(c["clicks"]),
-            f"{c['ctr']:.2f}%", f"${c['cpc']:.2f}", f"${c['cpm']:.2f}",
+            f"{c['ctr']:.2f}%", f"${c['cpc']:.2f}", f"${c['cpm']:.2f}{cpm_arrow}",
         ]
         x = 40
         for i, val in enumerate(values):
@@ -294,8 +339,12 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
                 color = RED
             elif i == 7 and c["cpc"] <= 0.12:
                 color = GREEN
-            elif i == 8 and c["cpm"] <= 2.0:
-                color = GREEN
+            elif i == 8:
+                arrow = get_cpm_arrow(c["campaign"], campaigns, yesterday_campaigns)
+                if "↑" in arrow:
+                    color = RED
+                elif "↓" in arrow:
+                    color = GREEN
             if i == 0:
                 draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
             else:

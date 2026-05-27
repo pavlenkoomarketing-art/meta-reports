@@ -109,7 +109,6 @@ def fetch_best_creative(account_id):
         data = r.json().get("data", [])
         if not data:
             return None
-        # Найти лучший по результатам
         best = None
         best_result = 0
         for ad in data:
@@ -157,7 +156,6 @@ def get_status(campaigns, yesterday_campaigns, is_weekly=False, client_context="
     data_str = json.dumps(campaigns, ensure_ascii=False)
     yesterday_str = json.dumps(yesterday_campaigns, ensure_ascii=False) if yesterday_campaigns else "[]"
     period = "тиждень" if is_weekly else "сьогодні"
-
     prompt = f"""Проаналізуй Meta Ads кампанії за {period} і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
 
 Контекст клієнта: {client_context}
@@ -177,7 +175,6 @@ def get_status(campaigns, yesterday_campaigns, is_weekly=False, client_context="
 - 🔴 тільки якщо різке падіння результатів або CTR < 0.8%
 - desc максимум 90 символів, конкретно: цифри, порівняння з вчора, дії
 - Мова: українська"""
-
     message = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=600,
@@ -331,7 +328,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
 
     sy = ys + (40 if summary_text else 10)
 
-    # Лучший креатив
     if best_creative:
         creative_text = f"🏆 Кращий креатив (7 днів): {best_creative['name'][:50]}   Результат: {best_creative['result']}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
         draw.text((40, sy), creative_text, font=font_sm, fill=GREEN)
@@ -386,14 +382,6 @@ def main():
             client_context = account.get("context", "")
             best_creative = fetch_best_creative(account["id"])
 
-            def main():
-    report_type = os.environ.get("REPORT_TYPE", "daily")
-
-    for account in ACCOUNTS:
-        try:
-            client_context = account.get("context", "")
-            best_creative = fetch_best_creative(account["id"])
-
             if report_type == "weekly":
                 today = datetime.utcnow()
                 last_monday = today - timedelta(days=today.weekday() + 7)
@@ -414,13 +402,10 @@ def main():
 
             elif report_type == "monthly":
                 today = datetime.utcnow()
-                # Перший день попереднього місяця
                 first_day = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
-                # Останній день попереднього місяця
                 last_day = today.replace(day=1) - timedelta(days=1)
                 start = first_day.strftime("%Y-%m-%d")
                 end = last_day.strftime("%Y-%m-%d")
-                # Позаминулий місяць для порівняння
                 prev_first = (first_day.replace(day=1) - timedelta(days=1)).replace(day=1)
                 prev_last = first_day - timedelta(days=1)
                 campaigns = fetch_data_custom(account["id"], start, end)

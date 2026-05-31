@@ -168,41 +168,53 @@ def fetch_data_custom(account_id, start_date, end_date):
     time.sleep(2)
     return fetch_meta_data(account_id, start_date, end_date)
 
-def get_status(campaigns, yesterday_campaigns, is_weekly=False, client_context=""):
+def get_arrow(curr, prev, reverse=False):
+    if prev == 0:
+        return ""
+    diff = ((curr - prev) / prev) * 100
+    if abs(diff) < 5:
+        return "→"
+    if diff > 0:
+        return "↑" if not reverse else "↓"
+    else:
+        return "↓" if not reverse else "↑"
+
+def get_arrow_color(arrow, reverse=False):
+    if arrow == "↑":
+        return (52, 199, 89) if not reverse else (255, 69, 58)
+    elif arrow == "↓":
+        return (255, 69, 58) if not reverse else (52, 199, 89)
+    return (160, 160, 170)
+
+def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_weekly=False):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     data_str = json.dumps(campaigns, ensure_ascii=False)
     yesterday_str = json.dumps(yesterday_campaigns, ensure_ascii=False) if yesterday_campaigns else "[]"
     period = "тиждень" if is_weekly else "сьогодні"
 
-    # Добавляем CPM тенденцию
-    cpm_trends = {}
-    if yesterday_campaigns:
-        yesterday_map = {c["campaign"]: c for c in yesterday_campaigns}
-        for c in campaigns:
-            yest = yesterday_map.get(c["campaign"])
-            if yest and yest["cpm"] > 0:
-                diff = ((c["cpm"] - yest["cpm"]) / yest["cpm"]) * 100
-                cpm_trends[c["campaign"]] = diff
-
-    prompt = f"""Проаналізуй Meta Ads кампанії за {period} і дай статус кожній. Відповідай ТІЛЬКИ JSON масивом без пояснень.
+    prompt = f"""Проаналізуй Meta Ads кампанії за {period}.
 
 Контекст клієнта: {client_context}
-
 Дані за {period}: {data_str}
 Дані за вчора: {yesterday_str}
-CPM тенденція (% зміна vs вчора): {json.dumps(cpm_trends, ensure_ascii=False)}
 
-Формат відповіді:
-[{{"emoji": "🟢", "name": "назва кампанії", "desc": "рекомендація"}}, ...]
+Відповідай ТІЛЬКИ JSON без пояснень у форматі:
+{{
+  "actions": ["дія 1", "дія 2", "дія 3", "дія 4"],
+  "overall": "🟢 Все добре"
+}}
 
-Правила:
-- Враховуй ціль кампанії (objective) при оцінці — для OUTCOME_TRAFFIC норма CTR >= 1.5%, для OUTCOME_ENGAGEMENT >= 2%, для OUTCOME_LEADS оцінюй CPL
-- Порівнюй з вчора — зміна >20% обов'язково вкажи
-- CPM зростає >15% — попередити про підвищення вартості показів
-- CPM падає >15% — позитивний сигнал, вказати
-- 🟢 добре, 🟡 слідкувати, 🔴 терміново
-- desc максимум 90 символів, конкретно: цифри, тренди, дії
-- Мова: українська"""
+Правила для "actions" (список "Що зробити сьогодні"):
+- 3-5 конкретних дій по кампаніях і креативах
+- Враховуй ціль кампанії (objective)
+- Порівнюй з вчора — якщо є зміна >20% вкажи
+- Конкретні назви кампаній і цифри
+- Мова: українська
+
+Правила для "overall":
+- 🟢 якщо все добре
+- 🟡 якщо є питання
+- 🔴 якщо є проблеми що потребують уваги"""
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
@@ -214,58 +226,27 @@ CPM тенденція (% зміна vs вчора): {json.dumps(cpm_trends, ens
         if "```" in text:
             text = text.split("```")[1].replace("json", "").strip()
         data = json.loads(text)
-        return [(d["emoji"], d["name"], d["desc"]) for d in data]
+        return data.get("actions", []), data.get("overall", "🟢 Все добре")
     except:
-        statuses = []
-        for c in campaigns:
-            if c["ctr"] >= 2.5 and c["cpc"] <= 0.15:
-                statuses.append(("🟢", c["campaign"], "все потужно, тримаємо"))
-            elif c["result"] <= 2 or c["ctr"] < 0.8:
-                statuses.append(("🔴", c["campaign"], "терміново перевірити / перезапустити"))
-            else:
-                statuses.append(("🟡", c["campaign"], "слідкувати за динамікою"))
-        return statuses
-
-def get_overall_status(campaigns):
-    red = sum(1 for c in campaigns if c["result"] <= 2 or c["ctr"] < 0.8)
-    green = sum(1 for c in campaigns if c["ctr"] >= 2.5 and c["cpc"] <= 0.15)
-    total = len(campaigns)
-    if red == 0 and green >= total // 2:
-        return ("🟢", "Загальний підсумок: все працює добре. Тримаємо курс!")
-    elif red >= total // 2:
-        return ("🔴", f"Загальний підсумок: {red} з {total} кампаній потребують термінової уваги!")
-    else:
-        return ("🟡", "Загальний підсумок: є моменти для покращення, слідкуємо за динамікою.")
-
-def get_cpm_arrow(campaign_name, campaigns, yesterday_campaigns):
-    if not yesterday_campaigns:
-        return ""
-    yesterday_map = {c["campaign"]: c for c in yesterday_campaigns}
-    yest = yesterday_map.get(campaign_name)
-    curr = next((c for c in campaigns if c["campaign"] == campaign_name), None)
-    if not yest or not curr or yest["cpm"] == 0:
-        return ""
-    diff = ((curr["cpm"] - yest["cpm"]) / yest["cpm"]) * 100
-    if diff > 15:
-        return " ↑"
-    elif diff < -15:
-        return " ↓"
-    return ""
+        return ["Перевірити показники кампаній"], "🟡 Потребує уваги"
 
 def generate_image(account_name, campaigns, yesterday_campaigns, title="Утренній звіт Meta Ads", period=None, best_creative=None, client_context=""):
     today = period if period else datetime.utcnow().strftime("%d.%m.%Y")
-    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%d.%m.%Y")
+    yesterday_date = (datetime.utcnow() - timedelta(days=1)).strftime("%d.%m.%Y")
     is_weekly = period is not None
-    statuses = get_status(campaigns, yesterday_campaigns, is_weekly=is_weekly, client_context=client_context)
-    overall_emoji, overall_text = get_overall_status(campaigns)
+
+    actions, overall = get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_weekly)
 
     if not is_weekly and yesterday_campaigns:
         y_cost = sum(c["cost"] for c in yesterday_campaigns)
         y_results = sum(c["result"] for c in yesterday_campaigns)
         y_cpr = y_cost / y_results if y_results else 0
-        summary_text = f"Вчора ({yesterday})   Витрачено: ${y_cost:.2f}   Отримано: {y_results} результатів   Ціна результату: ${y_cpr:.2f}"
+        summary_text = f"Вчора ({yesterday_date})   Витрачено: ${y_cost:.2f}   Отримано: {y_results} результатів по ціні: ${y_cpr:.2f}"
     else:
         summary_text = ""
+
+    # Build yesterday map for arrows
+    yesterday_map = {c["campaign"]: c for c in yesterday_campaigns} if yesterday_campaigns else {}
 
     BG = (28, 28, 30)
     BG2 = (38, 38, 40)
@@ -276,17 +257,18 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     YELLOW = (255, 204, 0)
     RED = (255, 69, 58)
     BORDER = (60, 60, 65)
+    LIGHT_GRAY = (100, 100, 110)
 
     W = 1200
     ROW_H = 56
     TABLE_TOP = 160
-    cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
-    col_w = [250, 100, 105, 95, 95, 75, 85, 85, 85]
-    STATUS_H = 80 + len(statuses) * 44
-    OVERALL_H = 60
+    cols = ["Кампанія", "Результат", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM", "CPL"]
+    col_w = [250, 95, 95, 100, 75, 85, 85, 85, 85]
+
+    ACTIONS_H = 50 + len(actions) * 30 + 20
     SUMMARY_H = 50 if summary_text else 10
-    CREATIVE_H = 60 if best_creative else 0
-    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + SUMMARY_H + STATUS_H + OVERALL_H + CREATIVE_H + 40
+    CREATIVE_H = 44 if best_creative else 0
+    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + SUMMARY_H + ACTIONS_H + CREATIVE_H + 40
 
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
@@ -295,15 +277,18 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         font_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
         font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
         font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
+        font_arrow = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
     except:
-        font_b = font_sm = font_title = ImageFont.load_default()
+        font_b = font_sm = font_title = font_arrow = ImageFont.load_default()
 
+    # Header
     draw.text((40, 28), title, font=font_title, fill=WHITE)
     draw.text((40, 64), f"Клієнт: {account_name}", font=font_sm, fill=GRAY)
     date_label = f"Період: {today}" if is_weekly else f"Дата: {today}"
     date_w = int(draw.textlength(date_label, font=font_sm))
     draw.text((W - date_w - 40, 28), date_label, font=font_sm, fill=GRAY)
 
+    # Table header
     x = 40
     draw.rectangle([x, TABLE_TOP, W - 40, TABLE_TOP + ROW_H], fill=BG3)
     for i, col in enumerate(cols):
@@ -323,45 +308,58 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         totals["impressions"] += c["impressions"]
         totals["clicks"] += c["clicks"]
 
+        yest = yesterday_map.get(c["campaign"], {})
         name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
-        cpm_arrow = get_cpm_arrow(c["campaign"], campaigns, yesterday_campaigns)
-        values = [
-            name, str(c["result"]), f"${c['cpr']:.2f}",
-            f"${c['cost']:.2f}", f"{c['impressions']:,}", str(c["clicks"]),
-            f"{c['ctr']:.2f}%", f"${c['cpc']:.2f}", f"${c['cpm']:.2f}{cpm_arrow}",
+
+        # Arrows for each metric
+        arr_result = get_arrow(c["result"], yest.get("result", 0))
+        arr_cost = get_arrow(c["cost"], yest.get("cost", 0), reverse=True)
+        arr_imp = get_arrow(c["impressions"], yest.get("impressions", 0))
+        arr_clicks = get_arrow(c["clicks"], yest.get("clicks", 0))
+        arr_ctr = get_arrow(c["ctr"], yest.get("ctr", 0))
+        arr_cpc = get_arrow(c["cpc"], yest.get("cpc", 0), reverse=True)
+        arr_cpm = get_arrow(c["cpm"], yest.get("cpm", 0), reverse=True)
+        arr_cpr = get_arrow(c["cpr"], yest.get("cpr", 0), reverse=True)
+
+        metrics = [
+            (name, None, None),
+            (str(c["result"]), arr_result, False),
+            (f"${c['cost']:.2f}", arr_cost, True),
+            (f"{c['impressions']:,}", arr_imp, False),
+            (str(c["clicks"]), arr_clicks, False),
+            (f"{c['ctr']:.2f}%", arr_ctr, False),
+            (f"${c['cpc']:.2f}", arr_cpc, True),
+            (f"${c['cpm']:.2f}", arr_cpm, True),
+            (f"${c['cpr']:.2f}", arr_cpr, True),
         ]
+
         x = 40
-        for i, val in enumerate(values):
-            color = WHITE
-            if i == 6 and c["ctr"] >= 2.5:
-                color = GREEN
-            elif i == 6 and c["ctr"] < 1.5:
-                color = RED
-            elif i == 7 and c["cpc"] <= 0.12:
-                color = GREEN
-            elif i == 8:
-                arrow = get_cpm_arrow(c["campaign"], campaigns, yesterday_campaigns)
-                if "↑" in arrow:
-                    color = RED
-                elif "↓" in arrow:
-                    color = GREEN
+        for i, (val, arrow, rev) in enumerate(metrics):
             if i == 0:
-                draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
+                draw.text((x + 10, y + 18), val, font=font_sm, fill=WHITE)
             else:
                 tw = int(draw.textlength(val, font=font_sm))
-                draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_sm, fill=color)
+                cx = x + col_w[i] // 2
+                if arrow and arrow != "→":
+                    arr_color = get_arrow_color(arrow, rev)
+                    aw = int(draw.textlength(arrow, font=font_arrow))
+                    total_w = tw + aw + 3
+                    draw.text((cx - total_w // 2, y + 18), val, font=font_sm, fill=WHITE)
+                    draw.text((cx - total_w // 2 + tw + 3, y + 20), arrow, font=font_arrow, fill=arr_color)
+                else:
+                    draw.text((cx - tw // 2, y + 18), val, font=font_sm, fill=WHITE)
             x += col_w[i]
 
+    # Totals row
     y = TABLE_TOP + ROW_H + len(campaigns) * ROW_H
     draw.rectangle([40, y, W - 40, y + ROW_H], fill=BG3)
     avg_ctr = sum(c["ctr"] for c in campaigns) / len(campaigns) if campaigns else 0
     avg_cpc = totals["cost"] / totals["clicks"] if totals["clicks"] else 0
     avg_cpm = totals["cost"] / totals["impressions"] * 1000 if totals["impressions"] else 0
     total_cpr = totals["cost"] / totals["result"] if totals["result"] else 0
-    total_vals = ["Разом", str(totals["result"]), f"${total_cpr:.2f}",
-                  f"${totals['cost']:.2f}", f"{totals['impressions']:,}",
-                  str(totals["clicks"]), f"{avg_ctr:.2f}%",
-                  f"${avg_cpc:.2f}", f"${avg_cpm:.2f}"]
+    total_vals = ["Разом", str(totals["result"]), f"${totals['cost']:.2f}",
+                  f"{totals['impressions']:,}", str(totals["clicks"]),
+                  f"{avg_ctr:.2f}%", f"${avg_cpc:.2f}", f"${avg_cpm:.2f}", f"${total_cpr:.2f}"]
     x = 40
     for i, val in enumerate(total_vals):
         if i == 0:
@@ -371,39 +369,35 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
             draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_b, fill=WHITE)
         x += col_w[i]
 
+    # Summary yesterday
     ys = y + ROW_H + 16
     if summary_text:
         draw.text((40, ys), summary_text, font=font_sm, fill=GRAY)
+        ys += 36
 
-    sy = ys + (40 if summary_text else 10)
-
+    # Best creative
     if best_creative:
-        creative_text = f"🏆 Кращий креатив (7 днів): {best_creative['name'][:50]}   Результат: {best_creative['result']}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
-        draw.text((40, sy), creative_text, font=font_sm, fill=GREEN)
-        sy += 44
+        creative_text = f"🏆 Кращий креатив (7 днів): {best_creative['name'][:45]}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
+        draw.text((40, ys), creative_text, font=font_sm, fill=GREEN)
+        ys += 36
 
-    draw.rectangle([40, sy, W - 40, sy + 36 + len(statuses) * 44 + 16], fill=BG2, outline=BORDER)
-    draw.text((56, sy + 10), "Статус кампаній", font=font_b, fill=WHITE)
-    sy += 46
-    for emoji, name, desc in statuses:
-        color = GREEN if emoji == "🟢" else (YELLOW if emoji == "🟡" else RED)
-        draw.ellipse([56, sy + 2, 70, sy + 16], fill=color)
-        short = name[:42] + "..." if len(name) > 42 else name
-        draw.text((82, sy), f"{short} — {desc}", font=font_sm, fill=WHITE)
-        sy += 44
-
-    sy += 16
-    overall_color = GREEN if overall_emoji == "🟢" else (YELLOW if overall_emoji == "🟡" else RED)
-    draw.rectangle([40, sy, W - 40, sy + 44], fill=BG3, outline=overall_color)
-    draw.ellipse([56, sy + 14, 70, sy + 28], fill=overall_color)
-    draw.text((82, sy + 13), overall_text, font=font_b, fill=WHITE)
+    # Actions block
+    sy = ys + 10
+    actions_block_h = 36 + len(actions) * 30 + 16
+    draw.rectangle([40, sy, W - 40, sy + actions_block_h], fill=BG2, outline=BORDER)
+    draw.text((56, sy + 10), "Що зробити сьогодні", font=font_b, fill=WHITE)
+    sy += 40
+    for action in actions:
+        short = action[:95] + "..." if len(action) > 95 else action
+        draw.text((56, sy), f"- {short}", font=font_sm, fill=GRAY)
+        sy += 30
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return buf.getvalue()
+    return buf.getvalue(), overall, summary_text
 
-def send_telegram_photo(photo_bytes):
+def send_telegram_photo(photo_bytes, caption=""):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     chat_ids = [TELEGRAM_CHAT_ID]
     if TELEGRAM_CHAT_ID_2:
@@ -411,7 +405,7 @@ def send_telegram_photo(photo_bytes):
     for chat_id in chat_ids:
         r = requests.post(
             url,
-            data={"chat_id": chat_id},
+            data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
             files={"photo": ("report.png", photo_bytes, "image/png")},
             timeout=30
         )
@@ -422,6 +416,25 @@ def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=15)
     r.raise_for_status()
+
+def build_caption(account_name, overall, summary_text, yesterday_campaigns, campaigns):
+    today = datetime.utcnow().strftime("%d.%m.%Y")
+    lines = [f"<b>Ранковий звіт · {today}</b>", f"🏢 Клієнт: {account_name}", ""]
+
+    if summary_text:
+        lines.append(f"<b>{summary_text}</b>")
+
+    # Порівняння з позавчора якщо є
+    if yesterday_campaigns and campaigns:
+        y_total = sum(c["result"] for c in yesterday_campaigns)
+        t_total = sum(c["result"] for c in campaigns)
+        diff = t_total - y_total
+        sign = "+" if diff >= 0 else ""
+        lines.append(f"Порівняно з вчора: {sign}{diff} результатів")
+
+    lines.append("")
+    lines.append(overall)
+    return "\n".join(lines)
 
 def main():
     report_type = os.environ.get("REPORT_TYPE", "daily")
@@ -441,13 +454,14 @@ def main():
                 if not campaigns:
                     send_telegram(f"⚠️ {account['name']}: немає даних за тиждень.")
                     continue
-                photo = generate_image(
+                photo, overall, summary_text = generate_image(
                     account["name"], campaigns, [],
                     title="Тижневий звіт Meta Ads",
                     period=f"{last_monday.strftime('%d.%m.%Y')} – {last_sunday.strftime('%d.%m.%Y')}",
                     best_creative=best_creative,
                     client_context=client_context,
                 )
+                caption = build_caption(account["name"], overall, summary_text, [], campaigns)
 
             elif report_type == "monthly":
                 today = datetime.utcnow()
@@ -464,13 +478,14 @@ def main():
                 if not campaigns:
                     send_telegram(f"⚠️ {account['name']}: немає даних за місяць.")
                     continue
-                photo = generate_image(
+                photo, overall, summary_text = generate_image(
                     account["name"], campaigns, prev_campaigns,
                     title="Місячний звіт Meta Ads",
                     period=f"{first_day.strftime('%d.%m.%Y')} – {last_day.strftime('%d.%m.%Y')}",
                     best_creative=best_creative,
                     client_context=client_context,
                 )
+                caption = build_caption(account["name"], overall, summary_text, prev_campaigns, campaigns)
 
             else:
                 campaigns = fetch_data(account["id"], "today")
@@ -478,13 +493,14 @@ def main():
                 if not campaigns:
                     send_telegram(f"⚠️ {account['name']}: немає даних за сьогодні.")
                     continue
-                photo = generate_image(
+                photo, overall, summary_text = generate_image(
                     account["name"], campaigns, yesterday_campaigns,
                     best_creative=best_creative,
                     client_context=client_context,
                 )
+                caption = build_caption(account["name"], overall, summary_text, yesterday_campaigns, campaigns)
 
-            send_telegram_photo(photo)
+            send_telegram_photo(photo, caption)
         except Exception as e:
             send_telegram(f"❌ Помилка: {e}")
 

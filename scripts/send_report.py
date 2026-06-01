@@ -7,18 +7,20 @@ from anthropic import Anthropic
 from PIL import Image, ImageDraw, ImageFont
 import io
 
-ANTHROPIC_API_KEY    = os.environ["ANTHROPIC_API_KEY"]
-TELEGRAM_BOT_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
-TELEGRAM_CHAT_ID_2   = os.environ.get("TELEGRAM_CHAT_ID_2", "")
-FB_APP_ID            = os.environ["FB_APP_ID"]
-FB_APP_SECRET        = os.environ["FB_APP_SECRET"]
-FB_ACCESS_TOKEN      = os.environ["FB_ACCESS_TOKEN"]
+ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]
+FB_APP_ID          = os.environ["FB_APP_ID"]
+FB_APP_SECRET      = os.environ["FB_APP_SECRET"]
+FB_ACCESS_TOKEN    = os.environ["FB_ACCESS_TOKEN"]
 
 ACCOUNTS = [
     {
         "id": "act_2474323176012939",
         "name": "VIET CORNER RK",
+        "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        "chat_ids": [
+            os.environ.get("TELEGRAM_CHAT_ID", ""),
+            os.environ.get("TELEGRAM_CHAT_ID_2", ""),
+        ],
         "context": """
             Ресторан в'єтнамської кухні в Одесі.
             Ціль реклами: доставка їжі та відвідування ресторану.
@@ -26,6 +28,23 @@ ACCOUNTS = [
             Нормальний CPR: до $0.15
             Нормальний CTR: від 1.5%
             Головні кампанії: доставка, контент (дописи), відео UGC.
+        """
+    },
+    {
+        "id": "act_707464865220616",
+        "name": "Затока Готель",
+        "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN_2", ""),
+        "chat_ids": [
+            os.environ.get("TELEGRAM_CHAT_ID", ""),
+            os.environ.get("TELEGRAM_CHAT_ID_4", ""),
+        ],
+        "context": """
+            Готельний комплекс в Затоці, Одеська область.
+            Є басейн на даху та вихід до моря.
+            Ціль реклами: бронювання номерів та залучення гостей.
+            Цільова аудиторія: сім'ї та пари, 25-55 років.
+            Нормальний CPR: до $0.50
+            Нормальний CTR: від 1.5%
         """
     },
 ]
@@ -204,7 +223,7 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
   "overall": "🟢 Все добре"
 }}
 
-Правила для "actions" (список "Що зробити сьогодні"):
+Правила для "actions":
 - 3-5 конкретних дій по кампаніях і креативах
 - Враховуй ціль кампанії (objective)
 - Порівнюй з вчора — якщо є зміна >20% вкажи
@@ -214,7 +233,7 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
 Правила для "overall":
 - 🟢 якщо все добре
 - 🟡 якщо є питання
-- 🔴 якщо є проблеми що потребують уваги"""
+- 🔴 якщо є проблеми"""
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
@@ -245,7 +264,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     else:
         summary_text = ""
 
-    # Build yesterday map for arrows
     yesterday_map = {c["campaign"]: c for c in yesterday_campaigns} if yesterday_campaigns else {}
 
     BG = (28, 28, 30)
@@ -254,10 +272,7 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     WHITE = (255, 255, 255)
     GRAY = (160, 160, 170)
     GREEN = (52, 199, 89)
-    YELLOW = (255, 204, 0)
-    RED = (255, 69, 58)
     BORDER = (60, 60, 65)
-    LIGHT_GRAY = (100, 100, 110)
 
     W = 1200
     ROW_H = 56
@@ -281,14 +296,12 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     except:
         font_b = font_sm = font_title = font_arrow = ImageFont.load_default()
 
-    # Header
     draw.text((40, 28), title, font=font_title, fill=WHITE)
     draw.text((40, 64), f"Клієнт: {account_name}", font=font_sm, fill=GRAY)
     date_label = f"Період: {today}" if is_weekly else f"Дата: {today}"
     date_w = int(draw.textlength(date_label, font=font_sm))
     draw.text((W - date_w - 40, 28), date_label, font=font_sm, fill=GRAY)
 
-    # Table header
     x = 40
     draw.rectangle([x, TABLE_TOP, W - 40, TABLE_TOP + ROW_H], fill=BG3)
     for i, col in enumerate(cols):
@@ -311,7 +324,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         yest = yesterday_map.get(c["campaign"], {})
         name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
 
-        # Arrows for each metric
         arr_result = get_arrow(c["result"], yest.get("result", 0))
         arr_cost = get_arrow(c["cost"], yest.get("cost", 0), reverse=True)
         arr_imp = get_arrow(c["impressions"], yest.get("impressions", 0))
@@ -350,7 +362,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
                     draw.text((cx - tw // 2, y + 18), val, font=font_sm, fill=WHITE)
             x += col_w[i]
 
-    # Totals row
     y = TABLE_TOP + ROW_H + len(campaigns) * ROW_H
     draw.rectangle([40, y, W - 40, y + ROW_H], fill=BG3)
     avg_ctr = sum(c["ctr"] for c in campaigns) / len(campaigns) if campaigns else 0
@@ -369,19 +380,16 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
             draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_b, fill=WHITE)
         x += col_w[i]
 
-    # Summary yesterday
     ys = y + ROW_H + 16
     if summary_text:
         draw.text((40, ys), summary_text, font=font_sm, fill=GRAY)
         ys += 36
 
-    # Best creative
     if best_creative:
         creative_text = f"🏆 Кращий креатив (7 днів): {best_creative['name'][:45]}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
         draw.text((40, ys), creative_text, font=font_sm, fill=GREEN)
         ys += 36
 
-    # Actions block
     sy = ys + 10
     actions_block_h = 36 + len(actions) * 30 + 16
     draw.rectangle([40, sy, W - 40, sy + actions_block_h], fill=BG2, outline=BORDER)
@@ -397,11 +405,10 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     buf.seek(0)
     return buf.getvalue(), overall, summary_text
 
-def send_telegram_photo(photo_bytes, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    chat_ids = [TELEGRAM_CHAT_ID]
-    if TELEGRAM_CHAT_ID_2:
-        chat_ids.append(TELEGRAM_CHAT_ID_2)
+def send_report(account, photo_bytes, caption):
+    bot_token = account["bot_token"]
+    chat_ids = [c for c in account["chat_ids"] if c]
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     for chat_id in chat_ids:
         r = requests.post(
             url,
@@ -410,28 +417,28 @@ def send_telegram_photo(photo_bytes, caption=""):
             timeout=30
         )
         r.raise_for_status()
-        print(f"Photo sent to {chat_id}!")
+        print(f"Sent to {chat_id}!")
 
-def send_telegram(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=15)
+def send_error(account, text):
+    bot_token = account["bot_token"]
+    chat_ids = [c for c in account["chat_ids"] if c]
+    if not bot_token or not chat_ids:
+        return
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    r = requests.post(url, json={"chat_id": chat_ids[0], "text": text}, timeout=15)
     r.raise_for_status()
 
 def build_caption(account_name, overall, summary_text, yesterday_campaigns, campaigns):
     today = datetime.utcnow().strftime("%d.%m.%Y")
     lines = [f"<b>Ранковий звіт · {today}</b>", f"🏢 Клієнт: {account_name}", ""]
-
     if summary_text:
         lines.append(f"<b>{summary_text}</b>")
-
-    # Порівняння з позавчора якщо є
     if yesterday_campaigns and campaigns:
         y_total = sum(c["result"] for c in yesterday_campaigns)
         t_total = sum(c["result"] for c in campaigns)
         diff = t_total - y_total
         sign = "+" if diff >= 0 else ""
         lines.append(f"Порівняно з вчора: {sign}{diff} результатів")
-
     lines.append("")
     lines.append(overall)
     return "\n".join(lines)
@@ -441,6 +448,10 @@ def main():
 
     for account in ACCOUNTS:
         try:
+            if not account.get("bot_token"):
+                print(f"Skipping {account['name']} — no bot token")
+                continue
+
             client_context = account.get("context", "")
             best_creative = fetch_best_creative(account["id"])
 
@@ -448,11 +459,11 @@ def main():
                 today = datetime.utcnow()
                 last_monday = today - timedelta(days=today.weekday() + 7)
                 last_sunday = last_monday + timedelta(days=6)
-                start = last_monday.strftime("%Y-%m-%d")
-                end = last_sunday.strftime("%Y-%m-%d")
-                campaigns = fetch_data_custom(account["id"], start, end)
+                campaigns = fetch_data_custom(account["id"],
+                    last_monday.strftime("%Y-%m-%d"),
+                    last_sunday.strftime("%Y-%m-%d"))
                 if not campaigns:
-                    send_telegram(f"⚠️ {account['name']}: немає даних за тиждень.")
+                    send_error(account, f"⚠️ {account['name']}: немає даних за тиждень.")
                     continue
                 photo, overall, summary_text = generate_image(
                     account["name"], campaigns, [],
@@ -467,16 +478,16 @@ def main():
                 today = datetime.utcnow()
                 first_day = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
                 last_day = today.replace(day=1) - timedelta(days=1)
-                start = first_day.strftime("%Y-%m-%d")
-                end = last_day.strftime("%Y-%m-%d")
                 prev_first = (first_day.replace(day=1) - timedelta(days=1)).replace(day=1)
                 prev_last = first_day - timedelta(days=1)
-                campaigns = fetch_data_custom(account["id"], start, end)
+                campaigns = fetch_data_custom(account["id"],
+                    first_day.strftime("%Y-%m-%d"),
+                    last_day.strftime("%Y-%m-%d"))
                 prev_campaigns = fetch_data_custom(account["id"],
                     prev_first.strftime("%Y-%m-%d"),
                     prev_last.strftime("%Y-%m-%d"))
                 if not campaigns:
-                    send_telegram(f"⚠️ {account['name']}: немає даних за місяць.")
+                    send_error(account, f"⚠️ {account['name']}: немає даних за місяць.")
                     continue
                 photo, overall, summary_text = generate_image(
                     account["name"], campaigns, prev_campaigns,
@@ -491,7 +502,7 @@ def main():
                 campaigns = fetch_data(account["id"], "today")
                 yesterday_campaigns = fetch_data(account["id"], "yesterday")
                 if not campaigns:
-                    send_telegram(f"⚠️ {account['name']}: немає даних за сьогодні.")
+                    send_error(account, f"⚠️ {account['name']}: немає даних за сьогодні.")
                     continue
                 photo, overall, summary_text = generate_image(
                     account["name"], campaigns, yesterday_campaigns,
@@ -500,9 +511,10 @@ def main():
                 )
                 caption = build_caption(account["name"], overall, summary_text, yesterday_campaigns, campaigns)
 
-            send_telegram_photo(photo, caption)
+            send_report(account, photo, caption)
+
         except Exception as e:
-            send_telegram(f"❌ Помилка: {e}")
+            send_error(account, f"❌ Помилка {account['name']}: {e}")
 
 if __name__ == "__main__":
     main()

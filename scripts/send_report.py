@@ -408,25 +408,36 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
 def send_report(account, photo_bytes, caption):
     bot_token = account["bot_token"]
     chat_ids = [c for c in account["chat_ids"] if c]
+    if not bot_token:
+        print(f"No bot token for {account['name']}, skipping send")
+        return
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     for chat_id in chat_ids:
-        r = requests.post(
-            url,
-            data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
-            files={"photo": ("report.png", photo_bytes, "image/png")},
-            timeout=30
-        )
-        r.raise_for_status()
-        print(f"Sent to {chat_id}!")
+        try:
+            r = requests.post(
+                url,
+                data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+                files={"photo": ("report.png", photo_bytes, "image/png")},
+                timeout=30
+            )
+            print(f"Send to {chat_id}: {r.status_code} {r.text[:100]}")
+            r.raise_for_status()
+            print(f"Sent to {chat_id}!")
+        except Exception as e:
+            print(f"Error sending to {chat_id}: {e}")
 
 def send_error(account, text):
-    bot_token = account["bot_token"]
-    chat_ids = [c for c in account["chat_ids"] if c]
+    bot_token = account.get("bot_token", "")
+    chat_ids = [c for c in account.get("chat_ids", []) if c]
     if not bot_token or not chat_ids:
+        print(f"Cannot send error for {account.get('name')} — no token or chat_ids")
         return
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    r = requests.post(url, json={"chat_id": chat_ids[0], "text": text}, timeout=15)
-    r.raise_for_status()
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        r = requests.post(url, json={"chat_id": chat_ids[0], "text": text}, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"Error sending error message: {e}")
 
 def build_caption(account_name, overall, summary_text, yesterday_campaigns, campaigns):
     today = datetime.utcnow().strftime("%d.%m.%Y")
@@ -445,8 +456,14 @@ def build_caption(account_name, overall, summary_text, yesterday_campaigns, camp
 
 def main():
     report_type = os.environ.get("REPORT_TYPE", "daily")
+    print(f"Report type: {report_type}")
 
     for account in ACCOUNTS:
+        print(f"\n=== Processing: {account['name']} ===")
+        print(f"Bot token: {'YES' if account.get('bot_token') else 'NO'}")
+        print(f"Chat IDs: {account['chat_ids']}")
+        print(f"Account ID: {account['id']}")
+
         try:
             if not account.get("bot_token"):
                 print(f"Skipping {account['name']} — no bot token")
@@ -454,6 +471,7 @@ def main():
 
             client_context = account.get("context", "")
             best_creative = fetch_best_creative(account["id"])
+            print(f"Best creative: {'found' if best_creative else 'not found'}")
 
             if report_type == "weekly":
                 today = datetime.utcnow()
@@ -462,6 +480,7 @@ def main():
                 campaigns = fetch_data_custom(account["id"],
                     last_monday.strftime("%Y-%m-%d"),
                     last_sunday.strftime("%Y-%m-%d"))
+                print(f"Weekly campaigns: {len(campaigns) if campaigns else 0}")
                 if not campaigns:
                     send_error(account, f"⚠️ {account['name']}: немає даних за тиждень.")
                     continue
@@ -486,6 +505,7 @@ def main():
                 prev_campaigns = fetch_data_custom(account["id"],
                     prev_first.strftime("%Y-%m-%d"),
                     prev_last.strftime("%Y-%m-%d"))
+                print(f"Monthly campaigns: {len(campaigns) if campaigns else 0}")
                 if not campaigns:
                     send_error(account, f"⚠️ {account['name']}: немає даних за місяць.")
                     continue
@@ -501,6 +521,8 @@ def main():
             else:
                 campaigns = fetch_data(account["id"], "today")
                 yesterday_campaigns = fetch_data(account["id"], "yesterday")
+                print(f"Today campaigns: {len(campaigns) if campaigns else 0}")
+                print(f"Yesterday campaigns: {len(yesterday_campaigns) if yesterday_campaigns else 0}")
                 if not campaigns:
                     send_error(account, f"⚠️ {account['name']}: немає даних за сьогодні.")
                     continue
@@ -514,6 +536,7 @@ def main():
             send_report(account, photo, caption)
 
         except Exception as e:
+            print(f"Exception for {account['name']}: {e}")
             send_error(account, f"❌ Помилка {account['name']}: {e}")
 
 if __name__ == "__main__":

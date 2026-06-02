@@ -49,6 +49,63 @@ ACCOUNTS = [
     },
 ]
 
+# Технические action_type которые НЕ считаем результатом
+EXCLUDE_ACTIONS = {
+    "link_click", "post_click", "post_view",
+    "video_view", "photo_view", "unique_link_clicks_ctr",
+    "page_engagement", "post_reaction",
+}
+
+# Приоритеты по цели кампании
+PRIORITY_MAP = {
+    "OUTCOME_LEADS": [
+        "lead", "onsite_conversion.lead_grouped",
+        "onsite_conversion.messaging_conversation_started_7d",
+        "onsite_conversion.messaging_first_reply",
+    ],
+    "OUTCOME_SALES": [
+        "purchase", "omni_purchase",
+        "onsite_conversion.total_messaging_connection",
+    ],
+    "OUTCOME_ENGAGEMENT": [
+        "onsite_conversion.messaging_conversation_started_7d",
+        "onsite_conversion.messaging_first_reply",
+        "post_engagement", "comment", "like",
+    ],
+    "OUTCOME_TRAFFIC": [
+        "landing_page_view", "link_click",
+    ],
+    "OUTCOME_AWARENESS": [
+        "reach", "link_click",
+    ],
+    "MESSAGES": [
+        "onsite_conversion.messaging_conversation_started_7d",
+        "onsite_conversion.messaging_first_reply",
+        "onsite_conversion.total_messaging_connection",
+    ],
+}
+
+def get_result_from_actions(actions, objective):
+    actions_map = {}
+    for a in actions:
+        atype = a.get("action_type", "")
+        val = int(float(a.get("value", 0)))
+        if val > 0:
+            actions_map[atype] = val
+
+    # Ищем по приоритету цели
+    priority_list = PRIORITY_MAP.get(objective, [])
+    for atype in priority_list:
+        if atype in actions_map:
+            return actions_map[atype]
+
+    # Если не нашли — берем наибольший action кроме технических
+    best_val = 0
+    for atype, val in actions_map.items():
+        if atype not in EXCLUDE_ACTIONS and val > best_val:
+            best_val = val
+    return best_val
+
 def get_long_lived_token():
     url = "https://graph.facebook.com/oauth/access_token"
     r = requests.get(url, params={
@@ -85,11 +142,7 @@ def fetch_meta_data(account_id, start_date, end_date):
                 cpm = float(row.get("cpm", 0))
                 objective = row.get("objective", "")
                 actions = row.get("actions", [])
-                result = 0
-                for action in actions:
-                    if action.get("action_type") == "link_click":
-                        result = int(float(action.get("value", 0)))
-                        break
+                result = get_result_from_actions(actions, objective)
                 cpr = spend / result if result > 0 else 0
                 results.append({
                     "campaign":    row.get("campaign_name", ""),
@@ -147,11 +200,7 @@ def fetch_best_creative(account_id):
         best_result = 0
         for ad in data:
             actions = ad.get("actions", [])
-            result = 0
-            for action in actions:
-                if action.get("action_type") == "link_click":
-                    result = int(float(action.get("value", 0)))
-                    break
+            result = get_result_from_actions(actions, "")
             if result > best_result:
                 best_result = result
                 best = ad
@@ -187,24 +236,6 @@ def fetch_data_custom(account_id, start_date, end_date):
     time.sleep(2)
     return fetch_meta_data(account_id, start_date, end_date)
 
-def get_arrow(curr, prev, reverse=False):
-    if prev == 0:
-        return ""
-    diff = ((curr - prev) / prev) * 100
-    if abs(diff) < 5:
-        return "→"
-    if diff > 0:
-        return "↑" if not reverse else "↓"
-    else:
-        return "↓" if not reverse else "↑"
-
-def get_arrow_color(arrow, reverse=False):
-    if arrow == "↑":
-        return (52, 199, 89) if not reverse else (255, 69, 58)
-    elif arrow == "↓":
-        return (255, 69, 58) if not reverse else (52, 199, 89)
-    return (160, 160, 170)
-
 def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_weekly=False):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     data_str = json.dumps(campaigns, ensure_ascii=False)
@@ -225,7 +256,7 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
 
 Правила для "actions":
 - 3-5 конкретних дій по кампаніях і креативах
-- Враховуй ціль кампанії (objective)
+- Враховуй ціль кампанії (objective) при аналізі
 - Порівнюй з вчора — якщо є зміна >20% вкажи
 - Конкретні назви кампаній і цифри
 - Мова: українська
@@ -264,14 +295,14 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     else:
         summary_text = ""
 
-    yesterday_map = {c["campaign"]: c for c in yesterday_campaigns} if yesterday_campaigns else {}
-
     BG = (28, 28, 30)
     BG2 = (38, 38, 40)
     BG3 = (48, 48, 52)
     WHITE = (255, 255, 255)
     GRAY = (160, 160, 170)
     GREEN = (52, 199, 89)
+    YELLOW = (255, 204, 0)
+    RED = (255, 69, 58)
     BORDER = (60, 60, 65)
 
     W = 1200
@@ -292,16 +323,17 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         font_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
         font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
         font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
-        font_arrow = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
     except:
-        font_b = font_sm = font_title = font_arrow = ImageFont.load_default()
+        font_b = font_sm = font_title = ImageFont.load_default()
 
+    # Header
     draw.text((40, 28), title, font=font_title, fill=WHITE)
     draw.text((40, 64), f"Клієнт: {account_name}", font=font_sm, fill=GRAY)
     date_label = f"Період: {today}" if is_weekly else f"Дата: {today}"
     date_w = int(draw.textlength(date_label, font=font_sm))
     draw.text((W - date_w - 40, 28), date_label, font=font_sm, fill=GRAY)
 
+    # Table header
     x = 40
     draw.rectangle([x, TABLE_TOP, W - 40, TABLE_TOP + ROW_H], fill=BG3)
     for i, col in enumerate(cols):
@@ -321,47 +353,37 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         totals["impressions"] += c["impressions"]
         totals["clicks"] += c["clicks"]
 
-        yest = yesterday_map.get(c["campaign"], {})
         name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
-
-        arr_result = get_arrow(c["result"], yest.get("result", 0))
-        arr_cost = get_arrow(c["cost"], yest.get("cost", 0), reverse=True)
-        arr_imp = get_arrow(c["impressions"], yest.get("impressions", 0))
-        arr_clicks = get_arrow(c["clicks"], yest.get("clicks", 0))
-        arr_ctr = get_arrow(c["ctr"], yest.get("ctr", 0))
-        arr_cpc = get_arrow(c["cpc"], yest.get("cpc", 0), reverse=True)
-        arr_cpm = get_arrow(c["cpm"], yest.get("cpm", 0), reverse=True)
-        arr_cpr = get_arrow(c["cpr"], yest.get("cpr", 0), reverse=True)
-
-        metrics = [
-            (name, None, None),
-            (str(c["result"]), arr_result, False),
-            (f"${c['cost']:.2f}", arr_cost, True),
-            (f"{c['impressions']:,}", arr_imp, False),
-            (str(c["clicks"]), arr_clicks, False),
-            (f"{c['ctr']:.2f}%", arr_ctr, False),
-            (f"${c['cpc']:.2f}", arr_cpc, True),
-            (f"${c['cpm']:.2f}", arr_cpm, True),
-            (f"${c['cpr']:.2f}", arr_cpr, True),
+        values = [
+            name,
+            str(c["result"]),
+            f"${c['cost']:.2f}",
+            f"{c['impressions']:,}",
+            str(c["clicks"]),
+            f"{c['ctr']:.2f}%",
+            f"${c['cpc']:.2f}",
+            f"${c['cpm']:.2f}",
+            f"${c['cpr']:.2f}",
         ]
-
         x = 40
-        for i, (val, arrow, rev) in enumerate(metrics):
+        for i, val in enumerate(values):
+            color = WHITE
+            if i == 5 and c["ctr"] >= 2.5:
+                color = GREEN
+            elif i == 5 and c["ctr"] < 1.5:
+                color = RED
+            elif i == 6 and c["cpc"] <= 0.12:
+                color = GREEN
+            elif i == 7 and c["cpm"] <= 2.0:
+                color = GREEN
             if i == 0:
-                draw.text((x + 10, y + 18), val, font=font_sm, fill=WHITE)
+                draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
             else:
                 tw = int(draw.textlength(val, font=font_sm))
-                cx = x + col_w[i] // 2
-                if arrow and arrow != "→":
-                    arr_color = get_arrow_color(arrow, rev)
-                    aw = int(draw.textlength(arrow, font=font_arrow))
-                    total_w = tw + aw + 3
-                    draw.text((cx - total_w // 2, y + 18), val, font=font_sm, fill=WHITE)
-                    draw.text((cx - total_w // 2 + tw + 3, y + 20), arrow, font=font_arrow, fill=arr_color)
-                else:
-                    draw.text((cx - tw // 2, y + 18), val, font=font_sm, fill=WHITE)
+                draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_sm, fill=color)
             x += col_w[i]
 
+    # Totals row
     y = TABLE_TOP + ROW_H + len(campaigns) * ROW_H
     draw.rectangle([40, y, W - 40, y + ROW_H], fill=BG3)
     avg_ctr = sum(c["ctr"] for c in campaigns) / len(campaigns) if campaigns else 0
@@ -380,16 +402,19 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
             draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_b, fill=WHITE)
         x += col_w[i]
 
+    # Summary yesterday
     ys = y + ROW_H + 16
     if summary_text:
         draw.text((40, ys), summary_text, font=font_sm, fill=GRAY)
         ys += 36
 
+    # Best creative
     if best_creative:
         creative_text = f"🏆 Кращий креатив (7 днів): {best_creative['name'][:45]}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
         draw.text((40, ys), creative_text, font=font_sm, fill=GREEN)
         ys += 36
 
+    # Actions block
     sy = ys + 10
     actions_block_h = 36 + len(actions) * 30 + 16
     draw.rectangle([40, sy, W - 40, sy + actions_block_h], fill=BG2, outline=BORDER)
@@ -409,7 +434,7 @@ def send_report(account, photo_bytes, caption):
     bot_token = account["bot_token"]
     chat_ids = [c for c in account["chat_ids"] if c]
     if not bot_token:
-        print(f"No bot token for {account['name']}, skipping send")
+        print(f"No bot token for {account['name']}, skipping")
         return
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     for chat_id in chat_ids:
@@ -420,7 +445,7 @@ def send_report(account, photo_bytes, caption):
                 files={"photo": ("report.png", photo_bytes, "image/png")},
                 timeout=30
             )
-            print(f"Send to {chat_id}: {r.status_code} {r.text[:100]}")
+            print(f"Send to {chat_id}: {r.status_code}")
             r.raise_for_status()
             print(f"Sent to {chat_id}!")
         except Exception as e:
@@ -462,7 +487,6 @@ def main():
         print(f"\n=== Processing: {account['name']} ===")
         print(f"Bot token: {'YES' if account.get('bot_token') else 'NO'}")
         print(f"Chat IDs: {account['chat_ids']}")
-        print(f"Account ID: {account['id']}")
 
         try:
             if not account.get("bot_token"):

@@ -49,14 +49,14 @@ ACCOUNTS = [
     },
 ]
 
-# Технические action_type которые НЕ считаем результатом
+# Технические action_type — НЕ вважаємо результатом
 EXCLUDE_ACTIONS = {
     "link_click", "post_click", "post_view",
     "video_view", "photo_view", "unique_link_clicks_ctr",
     "page_engagement", "post_reaction",
 }
 
-# Приоритеты по цели кампании
+# Пріоритети по цілі кампанії
 PRIORITY_MAP = {
     "OUTCOME_LEADS": [
         "lead", "onsite_conversion.lead_grouped",
@@ -93,13 +93,13 @@ def get_result_from_actions(actions, objective):
         if val > 0:
             actions_map[atype] = val
 
-    # Ищем по приоритету цели
+    # Шукаємо по пріоритету цілі
     priority_list = PRIORITY_MAP.get(objective, [])
     for atype in priority_list:
         if atype in actions_map:
             return actions_map[atype]
 
-    # Если не нашли — берем наибольший action кроме технических
+    # Якщо не знайшли — беремо найбільший action крім технічних
     best_val = 0
     for atype, val in actions_map.items():
         if atype not in EXCLUDE_ACTIONS and val > best_val:
@@ -305,11 +305,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     RED = (255, 69, 58)
     BORDER = (60, 60, 65)
 
-    W = 1200
+    W = 1280
     ROW_H = 56
     TABLE_TOP = 160
     cols = ["Кампанія", "Результат", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM", "CPL"]
-    col_w = [250, 95, 95, 100, 75, 85, 85, 85, 85]
+    col_w = [260, 105, 100, 105, 80, 90, 90, 90, 90]
 
     ACTIONS_H = 50 + len(actions) * 30 + 20
     SUMMARY_H = 50 if summary_text else 10
@@ -353,7 +353,7 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         totals["impressions"] += c["impressions"]
         totals["clicks"] += c["clicks"]
 
-        name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
+        name = c["campaign"][:30] + "..." if len(c["campaign"]) > 30 else c["campaign"]
         values = [
             name,
             str(c["result"]),

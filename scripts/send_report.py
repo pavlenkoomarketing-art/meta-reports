@@ -49,7 +49,6 @@ ACCOUNTS = [
     },
 ]
 
-# Технічні action_type — НЕ вважаємо результатом
 EXCLUDE_ACTIONS = {
     "link_click", "post_click", "post_view",
     "video_view", "photo_view", "unique_link_clicks_ctr",
@@ -58,7 +57,6 @@ EXCLUDE_ACTIONS = {
     "onsite_conversion.post_save",
 }
 
-# Пріоритети по цілі кампанії
 PRIORITY_MAP = {
     "OUTCOME_LEADS": [
         "lead", "onsite_conversion.lead_grouped",
@@ -96,13 +94,11 @@ def get_result_from_actions(actions, objective):
         if val > 0:
             actions_map[atype] = val
 
-    # Шукаємо по пріоритету цілі
     priority_list = PRIORITY_MAP.get(objective, [])
     for atype in priority_list:
         if atype in actions_map:
             return actions_map[atype]
 
-    # Якщо не знайшли — беремо найбільший action крім технічних
     best_val = 0
     for atype, val in actions_map.items():
         if atype not in EXCLUDE_ACTIONS and val > best_val:
@@ -126,7 +122,7 @@ def fetch_meta_data(account_id, start_date, end_date):
     params = {
         "access_token": token,
         "level": "campaign",
-        "fields": "campaign_name,impressions,clicks,ctr,cpc,cpm,spend,actions,objective",
+        "fields": "campaign_name,impressions,clicks,inline_link_clicks,inline_link_click_ctr,cpc,cpm,spend,actions,objective",
         "time_range": json.dumps({"since": start_date, "until": end_date}),
         "limit": 100,
     }
@@ -139,8 +135,8 @@ def fetch_meta_data(account_id, start_date, end_date):
             for row in data:
                 spend = float(row.get("spend", 0))
                 impressions = int(row.get("impressions", 0))
-                clicks = int(row.get("clicks", 0))
-                ctr = float(row.get("ctr", 0))
+                clicks = int(row.get("inline_link_clicks", 0) or row.get("clicks", 0))
+                ctr = float(row.get("inline_link_click_ctr", 0) or row.get("ctr", 0))
                 cpc = float(row.get("cpc", 0))
                 cpm = float(row.get("cpm", 0))
                 objective = row.get("objective", "")
@@ -181,7 +177,7 @@ def fetch_best_creative(account_id):
         params = {
             "access_token": token,
             "level": "ad",
-            "fields": "ad_name,impressions,clicks,ctr,spend,actions",
+            "fields": "ad_name,impressions,inline_link_clicks,inline_link_click_ctr,spend,actions",
             "time_range": json.dumps({"since": start, "until": end}),
             "limit": 50,
             "sort": "impressions_descending",
@@ -210,10 +206,11 @@ def fetch_best_creative(account_id):
         if best:
             spend = float(best.get("spend", 0))
             cpr = spend / best_result if best_result > 0 else 0
+            ctr = float(best.get("inline_link_click_ctr", 0) or best.get("ctr", 0))
             return {
                 "name": best.get("ad_name", ""),
                 "result": best_result,
-                "ctr": float(best.get("ctr", 0)),
+                "ctr": ctr,
                 "spend": spend,
                 "cpr": cpr,
             }
@@ -253,12 +250,13 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
 
 Відповідай ТІЛЬКИ JSON без пояснень у форматі:
 {{
-  "actions": ["дія 1", "дія 2", "дія 3", "дія 4"],
+  "actions": ["повна дія 1", "повна дія 2", "повна дія 3"],
   "overall": "🟢 Все добре"
 }}
 
 Правила для "actions":
-- 3-5 конкретних дій по кампаніях і креативах
+- 3-4 конкретні дії, КОЖНА ПОВНІСТЮ ОПИСАНА без обривів
+- Максимум 120 символів на дію — але завершена думка
 - Враховуй ціль кампанії (objective) при аналізі
 - Порівнюй з вчора — якщо є зміна >20% вкажи
 - Конкретні назви кампаній і цифри
@@ -271,7 +269,7 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=600,
+        max_tokens=700,
         messages=[{"role": "user", "content": prompt}],
     )
     try:
@@ -282,6 +280,22 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
         return data.get("actions", []), data.get("overall", "🟢 Все добре")
     except:
         return ["Перевірити показники кампаній"], "🟡 Потребує уваги"
+
+def wrap_text(draw, text, font, max_width):
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        test_line = current_line + (" " if current_line else "") + word
+        if draw.textlength(test_line, font=font) <= max_width:
+            current_line = test_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    return lines
 
 def generate_image(account_name, campaigns, yesterday_campaigns, title="Утренній звіт Meta Ads", period=None, best_creative=None, client_context=""):
     today = period if period else datetime.utcnow().strftime("%d.%m.%Y")
@@ -314,20 +328,30 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
     col_w = [270, 105, 105, 100, 110, 80, 90, 90, 90]
 
-    ACTIONS_H = 50 + len(actions) * 30 + 20
-    SUMMARY_H = 50 if summary_text else 10
-    CREATIVE_H = 44 if best_creative else 0
-    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + SUMMARY_H + ACTIONS_H + CREATIVE_H + 40
-
-    img = Image.new("RGB", (W, H), BG)
-    draw = ImageDraw.Draw(img)
-
     try:
         font_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
         font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
         font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     except:
         font_b = font_sm = font_title = ImageFont.load_default()
+
+    # Рассчитываем высоту блока actions с переносом строк
+    dummy_img = Image.new("RGB", (W, 100))
+    dummy_draw = ImageDraw.Draw(dummy_img)
+    action_line_height = 22
+    action_padding = 8
+    total_action_lines = 0
+    for action in actions:
+        lines = wrap_text(dummy_draw, f"- {action}", font_sm, W - 120)
+        total_action_lines += len(lines)
+
+    ACTIONS_H = 50 + total_action_lines * action_line_height + len(actions) * action_padding + 20
+    SUMMARY_H = 50 if summary_text else 10
+    CREATIVE_H = 30 if best_creative else 0
+    H = TABLE_TOP + ROW_H + (len(campaigns) + 1) * ROW_H + SUMMARY_H + CREATIVE_H + ACTIONS_H + 40
+
+    img = Image.new("RGB", (W, H), BG)
+    draw = ImageDraw.Draw(img)
 
     # Header
     draw.text((40, 28), title, font=font_title, fill=WHITE)
@@ -412,22 +436,24 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         draw.text((40, ys), summary_text, font=font_sm, fill=GRAY)
         ys += 36
 
-    # Best creative
+    # Best creative — без прямоугольника, просто текст
     if best_creative:
-        creative_text = f"🏆 Кращий креатив (7 днів): {best_creative['name'][:45]}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
+        creative_text = f"Кращий креатив (7 днів): {best_creative['name'][:45]}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
         draw.text((40, ys), creative_text, font=font_sm, fill=GREEN)
-        ys += 36
+        ys += 30
 
-    # Actions block
+    # Actions block с переносом строк
     sy = ys + 10
-    actions_block_h = 36 + len(actions) * 30 + 16
+    actions_block_h = 36 + total_action_lines * action_line_height + len(actions) * action_padding + 16
     draw.rectangle([40, sy, W - 40, sy + actions_block_h], fill=BG2, outline=BORDER)
     draw.text((56, sy + 10), "Що зробити сьогодні", font=font_b, fill=WHITE)
     sy += 40
     for action in actions:
-        short = action[:95] + "..." if len(action) > 95 else action
-        draw.text((56, sy), f"- {short}", font=font_sm, fill=GRAY)
-        sy += 30
+        lines = wrap_text(draw, f"- {action}", font_sm, W - 120)
+        for line in lines:
+            draw.text((56, sy), line, font=font_sm, fill=GRAY)
+            sy += action_line_height
+        sy += action_padding
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

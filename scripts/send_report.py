@@ -49,11 +49,13 @@ ACCOUNTS = [
     },
 ]
 
-# Технические action_type — НЕ вважаємо результатом
+# Технічні action_type — НЕ вважаємо результатом
 EXCLUDE_ACTIONS = {
     "link_click", "post_click", "post_view",
     "video_view", "photo_view", "unique_link_clicks_ctr",
     "page_engagement", "post_reaction",
+    "post_engagement", "comment", "like",
+    "onsite_conversion.post_save",
 }
 
 # Пріоритети по цілі кампанії
@@ -70,7 +72,8 @@ PRIORITY_MAP = {
     "OUTCOME_ENGAGEMENT": [
         "onsite_conversion.messaging_conversation_started_7d",
         "onsite_conversion.messaging_first_reply",
-        "post_engagement", "comment", "like",
+        "onsite_conversion.total_messaging_connection",
+        "lead",
     ],
     "OUTCOME_TRAFFIC": [
         "landing_page_view", "link_click",
@@ -305,11 +308,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     RED = (255, 69, 58)
     BORDER = (60, 60, 65)
 
-    W = 1280
+    W = 1300
     ROW_H = 56
     TABLE_TOP = 160
-    cols = ["Кампанія", "Результат", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM", "CPL"]
-    col_w = [260, 105, 100, 105, 80, 90, 90, 90, 90]
+    cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
+    col_w = [270, 105, 105, 100, 110, 80, 90, 90, 90]
 
     ACTIONS_H = 50 + len(actions) * 30 + 20
     SUMMARY_H = 50 if summary_text else 10
@@ -357,24 +360,24 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         values = [
             name,
             str(c["result"]),
+            f"${c['cpr']:.2f}",
             f"${c['cost']:.2f}",
             f"{c['impressions']:,}",
             str(c["clicks"]),
             f"{c['ctr']:.2f}%",
             f"${c['cpc']:.2f}",
             f"${c['cpm']:.2f}",
-            f"${c['cpr']:.2f}",
         ]
         x = 40
         for i, val in enumerate(values):
             color = WHITE
-            if i == 5 and c["ctr"] >= 2.5:
+            if i == 6 and c["ctr"] >= 2.5:
                 color = GREEN
-            elif i == 5 and c["ctr"] < 1.5:
+            elif i == 6 and c["ctr"] < 1.5:
                 color = RED
-            elif i == 6 and c["cpc"] <= 0.12:
+            elif i == 7 and c["cpc"] <= 0.12:
                 color = GREEN
-            elif i == 7 and c["cpm"] <= 2.0:
+            elif i == 8 and c["cpm"] <= 2.0:
                 color = GREEN
             if i == 0:
                 draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
@@ -390,9 +393,10 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     avg_cpc = totals["cost"] / totals["clicks"] if totals["clicks"] else 0
     avg_cpm = totals["cost"] / totals["impressions"] * 1000 if totals["impressions"] else 0
     total_cpr = totals["cost"] / totals["result"] if totals["result"] else 0
-    total_vals = ["Разом", str(totals["result"]), f"${totals['cost']:.2f}",
-                  f"{totals['impressions']:,}", str(totals["clicks"]),
-                  f"{avg_ctr:.2f}%", f"${avg_cpc:.2f}", f"${avg_cpm:.2f}", f"${total_cpr:.2f}"]
+    total_vals = ["Разом", str(totals["result"]), f"${total_cpr:.2f}",
+                  f"${totals['cost']:.2f}", f"{totals['impressions']:,}",
+                  str(totals["clicks"]), f"{avg_ctr:.2f}%",
+                  f"${avg_cpc:.2f}", f"${avg_cpm:.2f}"]
     x = 40
     for i, val in enumerate(total_vals):
         if i == 0:

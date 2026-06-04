@@ -25,9 +25,9 @@ ACCOUNTS = [
             Ресторан в'єтнамської кухні в Одесі.
             Ціль реклами: доставка їжі та відвідування ресторану.
             Цільова аудиторія: 21-54 роки, Одеса.
-            Нормальний CPR: до $0.15
             Нормальний CTR: від 1.5%
             Головні кампанії: доставка, контент (дописи), відео UGC.
+            Аналізуй CPR відносно динаміки кампанії та порівняння з вчора, не по фіксованій нормі.
         """
     },
     {
@@ -43,8 +43,8 @@ ACCOUNTS = [
             Є басейн на даху та вихід до моря.
             Ціль реклами: бронювання номерів та залучення гостей.
             Цільова аудиторія: сім'ї та пари, 25-55 років.
-            Нормальний CPR: до $0.50
             Нормальний CTR: від 1.5%
+            Аналізуй CPR відносно динаміки кампанії та порівняння з вчора, не по фіксованій нормі.
         """
     },
 ]
@@ -250,22 +250,17 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
 
 Відповідай ТІЛЬКИ JSON без пояснень у форматі:
 {{
-  "actions": ["повна дія 1", "повна дія 2", "повна дія 3"],
-  "overall": "🟢 Все добре"
+  "actions": ["повна дія 1", "повна дія 2", "повна дія 3"]
 }}
 
 Правила для "actions":
 - 3-4 конкретні дії, КОЖНА ПОВНІСТЮ ОПИСАНА без обривів
-- Максимум 120 символів на дію — але завершена думка
-- Враховуй ціль кампанії (objective) при аналізі
-- Порівнюй з вчора — якщо є зміна >20% вкажи
+- Максимум 130 символів на дію — але завершена думка обов'язково
+- Враховуй ціль кампанії (objective) при аналізі — різні цілі мають різну нормальну ціну результату
+- Аналізуй динаміку CPR відносно вчора та тренду, не порівнюй з фіксованими нормами
+- Порівнюй з вчора — якщо є зміна >20% вкажи конкретно
 - Конкретні назви кампаній і цифри
-- Мова: українська
-
-Правила для "overall":
-- 🟢 якщо все добре
-- 🟡 якщо є питання
-- 🔴 якщо є проблеми"""
+- Мова: українська"""
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
@@ -277,9 +272,9 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
         if "```" in text:
             text = text.split("```")[1].replace("json", "").strip()
         data = json.loads(text)
-        return data.get("actions", []), data.get("overall", "🟢 Все добре")
+        return data.get("actions", [])
     except:
-        return ["Перевірити показники кампаній"], "🟡 Потребує уваги"
+        return ["Перевірити показники кампаній"]
 
 def wrap_text(draw, text, font, max_width):
     words = text.split()
@@ -302,7 +297,7 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     yesterday_date = (datetime.utcnow() - timedelta(days=1)).strftime("%d.%m.%Y")
     is_weekly = period is not None
 
-    actions, overall = get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_weekly)
+    actions = get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_weekly)
 
     if not is_weekly and yesterday_campaigns:
         y_cost = sum(c["cost"] for c in yesterday_campaigns)
@@ -318,7 +313,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     WHITE = (255, 255, 255)
     GRAY = (160, 160, 170)
     GREEN = (52, 199, 89)
-    YELLOW = (255, 204, 0)
     RED = (255, 69, 58)
     BORDER = (60, 60, 65)
 
@@ -335,7 +329,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     except:
         font_b = font_sm = font_title = ImageFont.load_default()
 
-    # Рассчитываем высоту блока actions с переносом строк
     dummy_img = Image.new("RGB", (W, 100))
     dummy_draw = ImageDraw.Draw(dummy_img)
     action_line_height = 22
@@ -353,14 +346,12 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    # Header
     draw.text((40, 28), title, font=font_title, fill=WHITE)
     draw.text((40, 64), f"Клієнт: {account_name}", font=font_sm, fill=GRAY)
     date_label = f"Період: {today}" if is_weekly else f"Дата: {today}"
     date_w = int(draw.textlength(date_label, font=font_sm))
     draw.text((W - date_w - 40, 28), date_label, font=font_sm, fill=GRAY)
 
-    # Table header
     x = 40
     draw.rectangle([x, TABLE_TOP, W - 40, TABLE_TOP + ROW_H], fill=BG3)
     for i, col in enumerate(cols):
@@ -410,7 +401,6 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
                 draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_sm, fill=color)
             x += col_w[i]
 
-    # Totals row
     y = TABLE_TOP + ROW_H + len(campaigns) * ROW_H
     draw.rectangle([40, y, W - 40, y + ROW_H], fill=BG3)
     avg_ctr = sum(c["ctr"] for c in campaigns) / len(campaigns) if campaigns else 0
@@ -430,19 +420,16 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
             draw.text((x + col_w[i] // 2 - tw // 2, y + 18), val, font=font_b, fill=WHITE)
         x += col_w[i]
 
-    # Summary yesterday
     ys = y + ROW_H + 16
     if summary_text:
         draw.text((40, ys), summary_text, font=font_sm, fill=GRAY)
         ys += 36
 
-    # Best creative — без прямоугольника, просто текст
     if best_creative:
         creative_text = f"Кращий креатив (7 днів): {best_creative['name'][:45]}   CTR: {best_creative['ctr']:.2f}%   CPR: ${best_creative['cpr']:.2f}"
         draw.text((40, ys), creative_text, font=font_sm, fill=GREEN)
         ys += 30
 
-    # Actions block с переносом строк
     sy = ys + 10
     actions_block_h = 36 + total_action_lines * action_line_height + len(actions) * action_padding + 16
     draw.rectangle([40, sy, W - 40, sy + actions_block_h], fill=BG2, outline=BORDER)
@@ -458,7 +445,7 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return buf.getvalue(), overall, summary_text
+    return buf.getvalue(), summary_text
 
 def send_report(account, photo_bytes, caption):
     bot_token = account["bot_token"]
@@ -494,9 +481,9 @@ def send_error(account, text):
     except Exception as e:
         print(f"Error sending error message: {e}")
 
-def build_caption(account_name, overall, summary_text, yesterday_campaigns, campaigns):
+def build_caption(account_name, summary_text, yesterday_campaigns, campaigns):
     today = datetime.utcnow().strftime("%d.%m.%Y")
-    lines = [f"<b>Ранковий звіт · {today}</b>", f"🏢 Клієнт: {account_name}", ""]
+    lines = [f"<b>Ранковий звіт · {today}</b>", f"Клієнт: {account_name}", ""]
     if summary_text:
         lines.append(f"<b>{summary_text}</b>")
     if yesterday_campaigns and campaigns:
@@ -505,8 +492,6 @@ def build_caption(account_name, overall, summary_text, yesterday_campaigns, camp
         diff = t_total - y_total
         sign = "+" if diff >= 0 else ""
         lines.append(f"Порівняно з вчора: {sign}{diff} результатів")
-    lines.append("")
-    lines.append(overall)
     return "\n".join(lines)
 
 def main():
@@ -538,14 +523,14 @@ def main():
                 if not campaigns:
                     send_error(account, f"⚠️ {account['name']}: немає даних за тиждень.")
                     continue
-                photo, overall, summary_text = generate_image(
+                photo, summary_text = generate_image(
                     account["name"], campaigns, [],
                     title="Тижневий звіт Meta Ads",
                     period=f"{last_monday.strftime('%d.%m.%Y')} – {last_sunday.strftime('%d.%m.%Y')}",
                     best_creative=best_creative,
                     client_context=client_context,
                 )
-                caption = build_caption(account["name"], overall, summary_text, [], campaigns)
+                caption = build_caption(account["name"], summary_text, [], campaigns)
 
             elif report_type == "monthly":
                 today = datetime.utcnow()
@@ -563,14 +548,14 @@ def main():
                 if not campaigns:
                     send_error(account, f"⚠️ {account['name']}: немає даних за місяць.")
                     continue
-                photo, overall, summary_text = generate_image(
+                photo, summary_text = generate_image(
                     account["name"], campaigns, prev_campaigns,
                     title="Місячний звіт Meta Ads",
                     period=f"{first_day.strftime('%d.%m.%Y')} – {last_day.strftime('%d.%m.%Y')}",
                     best_creative=best_creative,
                     client_context=client_context,
                 )
-                caption = build_caption(account["name"], overall, summary_text, prev_campaigns, campaigns)
+                caption = build_caption(account["name"], summary_text, prev_campaigns, campaigns)
 
             else:
                 campaigns = fetch_data(account["id"], "today")
@@ -580,12 +565,12 @@ def main():
                 if not campaigns:
                     send_error(account, f"⚠️ {account['name']}: немає даних за сьогодні.")
                     continue
-                photo, overall, summary_text = generate_image(
+                photo, summary_text = generate_image(
                     account["name"], campaigns, yesterday_campaigns,
                     best_creative=best_creative,
                     client_context=client_context,
                 )
-                caption = build_caption(account["name"], overall, summary_text, yesterday_campaigns, campaigns)
+                caption = build_caption(account["name"], summary_text, yesterday_campaigns, campaigns)
 
             send_report(account, photo, caption)
 

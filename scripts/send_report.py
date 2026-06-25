@@ -53,6 +53,7 @@ ACCOUNTS = [
         "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN_3", ""),
         "chat_ids": [
             os.environ.get("TELEGRAM_CHAT_ID", ""),
+            os.environ.get("TELEGRAM_CHAT_ID_4", ""),
         ],
         "context": """
             Готель в Санжейці, Одеська область.

@@ -32,6 +32,7 @@ jobs:
           TELEGRAM_CHAT_ID_2: ${{ secrets.TELEGRAM_CHAT_ID_2 }}
           TELEGRAM_BOT_TOKEN_2: ${{ secrets.TELEGRAM_BOT_TOKEN_2 }}
           TELEGRAM_CHAT_ID_4: ${{ secrets.TELEGRAM_CHAT_ID_4 }}
+          TELEGRAM_BOT_TOKEN_3: ${{ secrets.TELEGRAM_BOT_TOKEN_3 }}
           FB_APP_ID: ${{ secrets.FB_APP_ID }}
           FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}

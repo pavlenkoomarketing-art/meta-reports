@@ -123,6 +123,12 @@ def get_result_from_actions(actions, objective):
             best_val = val
     return best_val
 
+def get_followers_from_actions(actions):
+    for a in actions:
+        if a.get("action_type") in ("onsite_conversion.follow", "page_fan_adds"):
+            return int(float(a.get("value", 0)))
+    return 0
+
 def get_long_lived_token():
     url = "https://graph.facebook.com/oauth/access_token"
     r = requests.get(url, params={
@@ -160,11 +166,13 @@ def fetch_meta_data(account_id, start_date, end_date):
                 objective = row.get("objective", "")
                 actions = row.get("actions", [])
                 result = get_result_from_actions(actions, objective)
+                followers = get_followers_from_actions(actions)
                 cpr = spend / result if result > 0 else 0
                 results.append({
                     "campaign":    row.get("campaign_name", ""),
                     "objective":   objective,
                     "result":      result,
+                    "followers":   followers,
                     "cost":        spend,
                     "impressions": impressions,
                     "clicks":      clicks,
@@ -275,6 +283,7 @@ def get_actions_and_text(campaigns, yesterday_campaigns, client_context, is_week
 - 3-4 конкретні дії, КОЖНА ПОВНІСТЮ ОПИСАНА без обривів
 - Максимум 130 символів на дію — але завершена думка обов'язково
 - Враховуй ціль кампанії (objective) при аналізі — різні цілі мають різну нормальну ціну результату
+- Якщо є дані по підписниках (followers) — враховуй їх в аналізі
 - Аналізуй динаміку CPR відносно вчора та тренду, не порівнюй з фіксованими нормами
 - Порівнюй з вчора — якщо є зміна >20% вкажи конкретно
 - Конкретні назви кампаній і цифри
@@ -334,11 +343,11 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     RED = (255, 69, 58)
     BORDER = (60, 60, 65)
 
-    W = 1300
+    W = 1400
     ROW_H = 56
     TABLE_TOP = 160
-    cols = ["Кампанія", "Результат", "Ціна/рез.", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
-    col_w = [270, 105, 105, 100, 110, 80, 90, 90, 90]
+    cols = ["Кампанія", "Результат", "Ціна/рез.", "Підписники", "Витрати", "Покази", "Кліки", "CTR", "CPC", "CPM"]
+    col_w = [240, 100, 100, 105, 95, 105, 75, 85, 85, 85]
 
     try:
         font_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
@@ -377,7 +386,7 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         draw.text((align_x, TABLE_TOP + 18), col, font=font_b, fill=GRAY)
         x += col_w[i]
 
-    totals = {"result": 0, "cost": 0, "impressions": 0, "clicks": 0}
+    totals = {"result": 0, "cost": 0, "impressions": 0, "clicks": 0, "followers": 0}
     for ri, c in enumerate(campaigns):
         y = TABLE_TOP + ROW_H + ri * ROW_H
         row_bg = BG if ri % 2 == 0 else BG2
@@ -388,12 +397,14 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         totals["cost"] += c["cost"]
         totals["impressions"] += c["impressions"]
         totals["clicks"] += c["clicks"]
+        totals["followers"] += c.get("followers", 0)
 
-        name = c["campaign"][:30] + "..." if len(c["campaign"]) > 30 else c["campaign"]
+        name = c["campaign"][:28] + "..." if len(c["campaign"]) > 28 else c["campaign"]
         values = [
             name,
             str(c["result"]),
             f"${c['cpr']:.2f}",
+            str(c.get("followers", 0)),
             f"${c['cost']:.2f}",
             f"{c['impressions']:,}",
             str(c["clicks"]),
@@ -404,13 +415,15 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
         x = 40
         for i, val in enumerate(values):
             color = WHITE
-            if i == 6 and c["ctr"] >= 2.5:
+            if i == 7 and c["ctr"] >= 2.5:
                 color = GREEN
-            elif i == 6 and c["ctr"] < 1.5:
+            elif i == 7 and c["ctr"] < 1.5:
                 color = RED
-            elif i == 7 and c["cpc"] <= 0.12:
+            elif i == 8 and c["cpc"] <= 0.12:
                 color = GREEN
-            elif i == 8 and c["cpm"] <= 2.0:
+            elif i == 9 and c["cpm"] <= 2.0:
+                color = GREEN
+            elif i == 3 and c.get("followers", 0) > 0:
                 color = GREEN
             if i == 0:
                 draw.text((x + 10, y + 18), val, font=font_sm, fill=color)
@@ -425,10 +438,18 @@ def generate_image(account_name, campaigns, yesterday_campaigns, title="Утре
     avg_cpc = totals["cost"] / totals["clicks"] if totals["clicks"] else 0
     avg_cpm = totals["cost"] / totals["impressions"] * 1000 if totals["impressions"] else 0
     total_cpr = totals["cost"] / totals["result"] if totals["result"] else 0
-    total_vals = ["Разом", str(totals["result"]), f"${total_cpr:.2f}",
-                  f"${totals['cost']:.2f}", f"{totals['impressions']:,}",
-                  str(totals["clicks"]), f"{avg_ctr:.2f}%",
-                  f"${avg_cpc:.2f}", f"${avg_cpm:.2f}"]
+    total_vals = [
+        "Разом",
+        str(totals["result"]),
+        f"${total_cpr:.2f}",
+        str(totals["followers"]),
+        f"${totals['cost']:.2f}",
+        f"{totals['impressions']:,}",
+        str(totals["clicks"]),
+        f"{avg_ctr:.2f}%",
+        f"${avg_cpc:.2f}",
+        f"${avg_cpm:.2f}",
+    ]
     x = 40
     for i, val in enumerate(total_vals):
         if i == 0:

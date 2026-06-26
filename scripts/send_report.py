@@ -180,6 +180,7 @@ def fetch_meta_data(account_id, start_date, end_date):
                 cpm = float(row.get("cpm", 0))
                 objective = row.get("objective", "")
                 actions = row.get("actions", [])
+                print(f"Campaign: {row.get('campaign_name', '')} | Actions: {json.dumps(actions, ensure_ascii=False)}")
                 result = get_result_from_actions(actions, objective)
                 followers = get_followers_from_actions(actions)
                 cpr = spend / result if result > 0 else 0

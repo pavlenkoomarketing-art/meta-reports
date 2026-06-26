@@ -139,9 +139,18 @@ def get_result_from_actions(actions, objective):
     return best_val
 
 def get_followers_from_actions(actions):
+    follow_types = (
+        "onsite_conversion.follow",
+        "page_fan_adds",
+        "onsite_conversion.page_fan_adds",
+        "instagram_profile_follow",
+        "onsite_conversion.instagram_profile_follow",
+    )
     for a in actions:
-        if a.get("action_type") in ("onsite_conversion.follow", "page_fan_adds"):
-            return int(float(a.get("value", 0)))
+        if a.get("action_type") in follow_types:
+            val = int(float(a.get("value", 0)))
+            if val > 0:
+                return val
     return 0
 
 def get_long_lived_token():
@@ -161,8 +170,9 @@ def fetch_meta_data(account_id, start_date, end_date):
     params = {
         "access_token": token,
         "level": "campaign",
-        "fields": "campaign_name,impressions,clicks,inline_link_clicks,inline_link_click_ctr,cpc,cpm,spend,actions,objective",
+        "fields": "campaign_name,impressions,clicks,inline_link_clicks,inline_link_click_ctr,cpc,cpm,spend,actions,action_values,objective",
         "time_range": json.dumps({"since": start_date, "until": end_date}),
+        "action_report_time": "impression",
         "limit": 100,
     }
     for attempt in range(3):
@@ -180,9 +190,9 @@ def fetch_meta_data(account_id, start_date, end_date):
                 cpm = float(row.get("cpm", 0))
                 objective = row.get("objective", "")
                 actions = row.get("actions", [])
-                print(f"Campaign: {row.get('campaign_name', '')} | Actions: {json.dumps(actions, ensure_ascii=False)}")
                 result = get_result_from_actions(actions, objective)
                 followers = get_followers_from_actions(actions)
+                print(f"Campaign: {row.get('campaign_name', '')} | Followers: {followers} | Actions types: {[a.get('action_type') for a in actions]}")
                 cpr = spend / result if result > 0 else 0
                 results.append({
                     "campaign":    row.get("campaign_name", ""),
